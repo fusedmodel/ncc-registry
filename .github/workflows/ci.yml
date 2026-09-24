@@ -1,0 +1,39 @@
+name: CI
+
+# 本仓库**没有任何 Go 单测**（`find -name '*_test.go'` 零命中）——
+# scripts/smoke.sh 是唯一的回归网，所以它必须在这一层跑起来。
+# 它自带启停：起一个 master + 一个 worker（端口 18282/18283），跑完自己收尾。
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: gofmt（有未格式化的文件就失败）
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [[ -n "${unformatted}" ]]; then
+            echo "以下文件未格式化："
+            echo "${unformatted}"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go build
+        run: go build ./...
+
+      - name: 冒烟测试（master + worker 两节点）
+        run: bash scripts/smoke.sh

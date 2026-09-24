@@ -1,0 +1,59 @@
+# 一个 master + 一个 worker 的最小集群示例。
+#
+#   cd ncc-registry/deploy && docker compose up -d --build
+#   → 控制台 http://127.0.0.1:8282  （master）
+#   → 控制台 http://127.0.0.1:8283  （worker）
+#
+# 生产上通常是：一台（或一组）master + 散在各内网机器上的 worker，
+# 把 NCCR_MASTER_URL 指向 master 的内网地址即可。
+services:
+  master:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: ncc-registry:dev
+    container_name: ncc-registry-master
+    environment:
+      NCCR_ROLE: master
+      NCCR_PORT: "8282"
+      # worker 看到的是容器内地址；跨机部署时改成 master 的内网 IP / 域名
+      NCCR_PUBLIC_URL: http://127.0.0.1:8282
+      NCCR_NODE_NAME: compose-master
+      NCCR_NODE_REGION: 内网-演示
+      # 生产务必设一个随机串：worker 必须带 X-NCC-Cluster-Token 才能注册
+      NCCR_CLUSTER_TOKEN: ${NCCR_CLUSTER_TOKEN:-}
+      # 留空 = 内网开放注册；要门禁就设邀请码
+      NCCR_INVITE_CODE: ${NCCR_INVITE_CODE:-}
+      # 字节/库想放别处就显式指（默认都在 /data 下）：
+      #   NCCR_BLOB_DIR: /blobs        # 再把宿主机目录/NAS 挂到 /blobs
+      #   NCCR_DB_PATH: /ssd/ncc.sqlite
+    ports:
+      - "8282:8282"
+    volumes:
+      - master-data:/data
+      # - /mnt/nas/ncc-blobs:/blobs   # 字节落 NAS 的写法
+    restart: unless-stopped
+
+  worker-a:
+    image: ncc-registry:dev
+    container_name: ncc-registry-worker-a
+    depends_on:
+      - master
+    environment:
+      NCCR_ROLE: worker
+      NCCR_PORT: "8282"
+      NCCR_PUBLIC_URL: http://127.0.0.1:8283
+      NCCR_NODE_NAME: compose-worker-a
+      NCCR_NODE_REGION: 内网-演示
+      NCCR_MASTER_URL: http://master:8282
+      NCCR_CLUSTER_TOKEN: ${NCCR_CLUSTER_TOKEN:-}
+      NCCR_HEARTBEAT: 15s
+    ports:
+      - "8283:8282"
+    volumes:
+      - worker-a-data:/data
+    restart: unless-stopped
+
+volumes:
+  master-data:
+  worker-a-data:

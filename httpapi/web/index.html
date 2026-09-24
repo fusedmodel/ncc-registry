@@ -1,0 +1,710 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>NCC Registry · 内网托管节点</title>
+<meta name="robots" content="noindex" />
+<style>
+:root{
+  --bg:#fff; --bg2:#f9fafb; --bg3:#f3f4f6; --ink:#111827; --ink2:#4b5563;
+  --ink3:#6b7280; --ink4:#9ca3af; --line:#e5e7eb; --line2:#f3f4f6;
+  --ok:#16a34a; --err:#dc2626;
+  --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --sans:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Noto Sans SC',system-ui,sans-serif;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:var(--sans);color:var(--ink);background:var(--bg);line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:inherit;text-decoration:none}
+.wrap{max-width:1120px;margin:0 auto;padding:0 24px}
+header{border-bottom:1px solid var(--line2);position:sticky;top:0;background:rgba(255,255,255,.86);backdrop-filter:blur(12px);z-index:9}
+.hrow{display:flex;align-items:center;gap:14px;height:62px}
+.logo{display:grid;place-items:center;width:28px;height:28px;border-radius:8px;background:var(--ink);color:#fff;font-weight:800;font-size:13px}
+.brand{font-weight:800;letter-spacing:-.015em;font-size:16px}
+.brand span{color:var(--ink3);font-weight:600}
+.grow{flex:1}
+button{font-family:inherit;font-size:13px;font-weight:600;border:1px solid var(--line);background:#fff;color:var(--ink);border-radius:9px;padding:7px 13px;cursor:pointer}
+button:hover{border-color:var(--ink)}
+section{padding:30px 0 6px}
+h2{font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--ink3);margin-bottom:12px}
+.grid{display:grid;gap:12px}
+.kv{display:grid;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.kv div{background:#fff;padding:12px 14px}
+.kv b{display:block;font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--ink4);margin-bottom:3px}
+.kv i{font-style:normal;font-family:var(--mono);font-size:12.5px;color:var(--ink);word-break:break-all}
+table{width:100%;border-collapse:collapse;font-size:13.5px}
+th{text-align:left;font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink4);font-weight:700;padding:0 10px 8px;border-bottom:1px solid var(--line)}
+td{padding:10px;border-bottom:1px solid var(--line2);vertical-align:top}
+td.mono,.mono{font-family:var(--mono);font-size:12.5px}
+.muted{color:var(--ink3)}
+.badge{display:inline-block;font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.03em;padding:2px 8px;border-radius:999px;border:1px solid var(--line);background:#fff;color:var(--ink3);text-transform:uppercase}
+.badge.dark{background:var(--ink);color:#fff;border-color:var(--ink)}
+.badge.ok{color:var(--ok);border-color:#bbf7d0}
+.badge.off{color:var(--ink4)}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+input,select{font-family:inherit;font-size:13.5px;padding:8px 11px;border:1px solid var(--line);border-radius:9px;background:#fff;color:var(--ink)}
+input:focus,select:focus{outline:none;border-color:var(--ink)}
+.empty{padding:18px;border:1px dashed var(--line);border-radius:12px;color:var(--ink3);font-size:13.5px;background:var(--bg2)}
+pre{font-family:var(--mono);font-size:12.5px;background:var(--bg2);border:1px solid var(--line2);border-radius:12px;padding:14px 16px;overflow-x:auto;color:var(--ink2);line-height:1.8}
+pre b{color:var(--ink)}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:900px){.two{grid-template-columns:1fr}}
+footer{padding:34px 0 48px;color:var(--ink4);font-size:12.5px}
+.tag{display:inline-block;font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-radius:999px;padding:2px 9px;color:var(--ink2);margin-right:5px}
+.err{color:var(--err);font-size:13px}
+.acts{display:flex;gap:6px;flex-wrap:wrap}
+.acts button{padding:4px 10px;font-size:12px;border-radius:8px}
+.acts button.danger{color:var(--err);border-color:#fecaca}
+.acts button.danger:hover{border-color:var(--err)}
+.gate{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.gate input{min-width:180px}
+.note{margin:0 0 12px;padding:10px 13px;border:1px solid var(--line);border-radius:10px;background:var(--bg2);color:var(--ink2);font-size:13px}
+.pwbox{margin-top:8px;padding:9px 12px;border:1px dashed #fecaca;border-radius:9px;background:#fff5f5;font-family:var(--mono);font-size:13px}
+.acts button.arming{border-color:var(--err);color:var(--err);background:#fff5f5}
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap hrow">
+    <div class="logo">N</div>
+    <div class="brand">NCC Registry <span id="hdrRole">node</span></div>
+    <div class="grow"></div>
+    <span id="hdrNode" class="mono muted"></span>
+    <button id="refresh">刷新</button>
+  </div>
+</header>
+
+<main class="wrap">
+  <section>
+    <h2>本节点</h2>
+    <div class="kv" id="selfBox"></div>
+  </section>
+
+  <section>
+    <h2>集群（多节点）</h2>
+    <div id="clusterBox"></div>
+  </section>
+
+  <section>
+    <h2>聚合目录（本节点 + 各 worker）</h2>
+    <div class="row">
+      <input id="q" placeholder="搜索 name / slug / summary" size="28" />
+      <select id="kind"><option value="">全部类型</option></select>
+      <button id="search">搜索</button>
+      <span id="dirMeta" class="muted mono"></span>
+    </div>
+    <div id="dirBox"></div>
+  </section>
+
+  <section>
+    <h2>托管节点（Agent 发现）</h2>
+    <div id="nodesBox"></div>
+  </section>
+
+  <section>
+    <h2>配置托管（团队网络 / 基础设施 / Agent 配置）</h2>
+    <p class="muted">配置<b>默认私有</b>：控制台不带凭据，这里只列公开配置。管理自己的配置用 CLI（<code>ncc registry config …</code>），需要 <code>config:read/write</code> 作用域与命名空间成员身份。</p>
+    <div class="row">
+      <select id="cfgKind"><option value="">全部类型</option></select>
+      <select id="cfgEnv"><option value="">全部环境</option></select>
+      <button id="cfgSearch">检索</button>
+      <span id="cfgMeta" class="muted mono"></span>
+    </div>
+    <div id="cfgBox"></div>
+  </section>
+
+  <section id="adminSec">
+    <h2>节点管理（管理员）</h2>
+    <p class="muted">管<b>用户 / 节点 / 服务</b>：禁用启用、重置密码、摘除节点、归档服务条目 —— 每个动作都进审计。
+      需要节点管理员身份：<b>本节点第一个注册的账号</b>（自动成为管理员），或一把机器凭据（<code>AK-…</code> + secret）。</p>
+    <div class="row gate">
+      <input id="admKey" placeholder="admin key（AK-…）" size="18" autocomplete="off" />
+      <input id="admSecret" placeholder="admin secret" size="30" type="password" autocomplete="off" />
+      <button id="admConnect">验证并加载</button>
+      <button id="admClear">清除本机凭据</button>
+      <span id="admMeta" class="muted mono"></span>
+    </div>
+    <div id="admGate" class="note">尚未验证管理员凭据：本区块只读不了任何治理数据。
+      凭据只存在这台浏览器（localStorage），不会发给其它域。</div>
+    <div id="admBox" style="display:none">
+      <div class="kv" id="admKv" style="margin-bottom:16px"></div>
+      <div class="row">
+        <input id="admQ" placeholder="检索用户 / 节点 / 服务" size="24" />
+        <input id="admNote" placeholder="禁用原因（可选，会显示给本人）" size="28" />
+        <button id="admSearch">检索</button>
+        <span id="admMsg" class="err"></span>
+      </div>
+      <div id="admOut"></div>
+      <h2 style="margin-top:14px">用户</h2>
+      <div id="admUsers"></div>
+      <h2 style="margin-top:18px">托管节点</h2>
+      <div id="admNodes"></div>
+      <h2 style="margin-top:18px">服务（节点侧 kind=service · 制品侧 kind=api）</h2>
+      <div id="admServices"></div>
+      <h2 style="margin-top:18px">分享链接</h2>
+      <div id="admShares"></div>
+      <h2 style="margin-top:18px">机器管理凭据</h2>
+      <div id="admKeys"></div>
+      <h2 style="margin-top:18px">审计日志</h2>
+      <div id="admAudit"></div>
+    </div>
+  </section>
+
+  <section class="two">
+    <div>
+      <h2>接入：CLI</h2>
+      <pre id="cliBox"></pre>
+    </div>
+    <div>
+      <h2>接入：HTTP API</h2>
+      <pre id="apiBox"></pre>
+    </div>
+  </section>
+
+  <footer class="wrap">
+    NCC Registry · 内网托管节点 / 制品托管 / 配置托管 / 分享 / Agent 发现与互联 · <span id="foot"></span>
+  </footer>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const sizeTxt = (n) => !n ? '—' : n < 1024 ? n + ' B' : n < 1048576 ? (n/1024).toFixed(1) + ' KB' : (n/1048576).toFixed(1) + ' MB';
+const timeTxt = (s) => { if (!s) return '—'; const d = new Date(s); return isNaN(d) ? '—' : d.toLocaleString(); };
+
+async function jget(path) {
+  const r = await fetch(path, { headers: { Accept: 'application/json' } });
+  if (!r.ok) throw new Error(path + ' → HTTP ' + r.status);
+  return r.json();
+}
+
+function kv(pairs) {
+  return pairs.map(([k, v]) => `<div><b>${esc(k)}</b><i>${esc(v ?? '—')}</i></div>`).join('');
+}
+
+function table(head, rows) {
+  if (!rows.length) return '<div class="empty">暂无数据</div>';
+  return `<table><thead><tr>${head.map((h) => `<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${rows.join('')}</tbody></table>`;
+}
+
+function statusBadge(online) {
+  return online ? '<span class="badge ok">在线</span>' : '<span class="badge off">离线</span>';
+}
+
+async function loadSelf() {
+  const m = await jget('/api/meta');
+  const n = m.node || {};
+  $('hdrRole').textContent = n.role === 'master' ? 'master' : 'worker';
+  $('hdrNode').textContent = n.id + ' · ' + n.version;
+  $('selfBox').innerHTML = kv([
+    ['角色', n.role], ['节点名', n.name], ['节点 ID', n.id],
+    ['对外地址', n.url], ['区域', n.region || '未声明'], ['版本', n.version],
+    ['制品（公开已发布）', m.counts?.artifacts ?? 0],
+    ['托管节点', m.counts?.hostedNodes ?? 0],
+    ['服务（节点侧 + 制品侧）', m.counts?.services ?? 0],
+    ['托管配置（公开）', `${m.counts?.publicConfigs ?? 0} / ${m.counts?.configs ?? 0}`],
+    ['分享链接（有效）', m.counts?.shares ?? 0],
+    ['账号', `${m.counts?.users ?? 0}（管理员 ${m.counts?.admins ?? 0}）`],
+    ['制品字节目录', m.storage?.blobDir],
+    ['库文件', m.storage?.dbPath],
+    ['数据根目录', m.storage?.dataDir],
+  ]);
+  $('foot').textContent = m.about || '';
+  $('cliBox').innerHTML = [
+    `<b># 1) 登录本节点</b>`,
+    `ncc --base ${esc(n.url)} registry login --email you@corp.com --password '***'`,
+    ``,
+    `<b># 2) 把自己的 Agent 节点托管进来</b>`,
+    `ncc registry join --kind agent --name my-agent --region 上海-内网 --daemon`,
+    ``,
+    `<b># 2b) 或用一条内网短链让对方自己接进来（签发一次）</b>`,
+    `ncc registry ticket create --label "给 alice 的 Agent" --uses 1 --expires 7`,
+    `#   → 把打印出的链接发给对方：ncc registry add '<链接>' --join`,
+    ``,
+    `<b># 3) 看集群与我的节点</b>`,
+    `ncc registry status`,
+    `ncc registry nodes --kind agent`,
+    `ncc registry route @alice/hotel-skill`,
+    ``,
+    `<b># 4) 制品发布 / 分发 / 下架回收（沿用既有命令）</b>`,
+    `ncc publish --file ./hotel.SKILL.md --kind skill --name "Hotel Skill" --replicate all`,
+    `ncc registry catalog`,
+    `ncc registry rm @alice/hotel-skill --yes`,
+    ``,
+    `<b># 5) 授权别人取你的私有制品 / 私有节点 / 非公开配置（连接 ≠ 授权）</b>`,
+    `ncc grant set --user @bob --kind artifact`,
+    `ncc grant set --user @bob --kind node`,
+    `ncc grant set --user @bob --kind config`,
+    ``,
+    `<b># 6) 配置托管：把团队的网络 / 基础设施配置交给 Agent 管</b>`,
+    `ncc registry config list --mine`,
+    `ncc registry config set @team/network --file ./network.yaml --kind network --env prod --note "加 VLAN"`,
+    `ncc registry config get @team/network --reveal --out ./network.yaml`,
+    `ncc registry config history @team/network && ncc registry config rollback @team/network --to 2`,
+    `ncc registry config bundle --ns @team --env prod --out ./conf`,
+    `# 给 Agent 的长效凭据（只带它该有的作用域）：`,
+    `ncc registry ticket create --label "agent-conf" --scopes config:read,config:write,nodes:write`,
+    ``,
+    `<b># 7) 分享：把一条制品变成临时下载地址（对方不用登录）</b>`,
+    `ncc registry share create @team/report --label "给合作方" --uses 1 --expires 7`,
+    `#   → 链接 <本节点>/s/<token>（说明页）与 /s/<token>/raw（直链，只有它计数）`,
+    `ncc registry share list            # 我的（--all 需管理员）`,
+    `ncc registry share rm <SH-…|链接>   # 撤销，立即失效`,
+    ``,
+    `<b># 8) 节点管理：管用户 / 节点 / 服务（需管理员账号或 admin key/secret）</b>`,
+    `ncc registry admin status                              # 我是不是管理员、本机凭据能不能用`,
+    `ncc registry admin login --key AK-… --secret …          # 把机器凭据写进本机配置`,
+    `ncc registry admin overview                            # 用户 / 节点 / 服务 / 资产计数`,
+    `ncc registry admin users                               # 谁在这台节点注册过`,
+    `ncc registry admin disable bob@corp.com --note "违规发布"  # 禁用（旧令牌立即失效）`,
+    `ncc registry admin passwd bob@corp.com                  # 重置密码（服务端生成，只显示一次）`,
+    `ncc registry admin nodes --kind service                 # 全部托管节点（含私有与离线）`,
+    `ncc registry admin services                             # 服务：节点侧 kind=service + 制品侧 kind=api`,
+    `ncc registry admin rm-service ND-…  或  @team/hotel-api   # 节点摘除 / 制品归档`,
+    `ncc registry admin audit --limit 20                     # 审计：谁在什么时候把谁怎么了`,
+    `ncc registry admin rotate --label ops                   # 轮换 admin key/secret（旧的立即失效）`,
+  ].join('\n');
+  $('apiBox').innerHTML = [
+    `GET  /api/meta`,
+    `POST /api/auth/register|login`,
+    `GET  /api/registry?q=&kind=&namespace=`,
+    `GET  /api/registry/@ns/slug/download`,
+    `GET  /api/configs?namespace=&kind=&env=&mine=    (配置目录)`,
+    `GET  /api/configs/@ns/slug?reveal=1              (取明文；默认打码)`,
+    `POST /api/configs                                (创建，需 config:write)`,
+    `PATCH/DELETE /api/configs/@ns/slug               (改内容加版本 / 删除)`,
+    `GET  /api/configs/@ns/slug/revisions             (版本历史)`,
+    `POST /api/configs/@ns/slug/rollback              (回滚到某版)`,
+    `GET  /api/configs/bundle?namespace=&env=prod     (成组拉取)`,
+    `GET  /api/configs/kinds                          (类型/格式/环境目录)`,
+    `POST /api/shares                                 (建分享链接，需登录 + 对该制品有读权)`,
+    `GET  /api/shares?all=1                           (全部分享，需管理员)`,
+    `GET  /api/shares/info/<token>                    (公开：看链接状态，不计数)`,
+    `GET  /s/<token>  |  /s/<token>/raw               (公开领取：说明页 / 直链，raw 计次)`,
+    `GET  /api/admin/overview|users|nodes|services    (节点治理，需管理员)`,
+    `PATCH/DELETE /api/admin/users/<id>…              (禁用启用 / 重置密码)`,
+    `POST /api/admin/keys/rotate                      (轮换 admin key/secret)`,
+    `GET  /api/admin/audit                            (审计日志)`,
+    `POST /api/registry/uploads   (raw + X-Filename)`,
+    `POST /api/registry           (create item, replicate=all)`,
+    `DELETE /api/registry/@ns/slug (下架 + 回收副本)`,
+    `POST /api/nodes/heartbeat    (节点注册+心跳)`,
+    `GET  /api/nodes/discover?kind=agent&region=`,
+    `GET  /api/cluster`,
+    `GET  /api/cluster/directory`,
+    `POST /api/cluster/replicate  (ref, targets)`,
+    `GET  /api/nodes/route?ref=@ns/slug`,
+    `POST /api/access/tickets     (签发接入票据)`,
+    `POST /api/access/redeem      (key + secret → 节点令牌)`,
+    `GET  /api/grants?direction=outgoing|incoming`,
+    ``,
+    `鉴权: Authorization: Bearer <JWT / 节点令牌 / ncc_ API-Key>`,
+    `管理: X-NCC-Admin-Key + X-NCC-Admin-Secret（节点管理员机器凭据）`,
+    `集群: X-NCC-Cluster-Token（master 配了 token 时）`,
+  ].join('\n');
+}
+
+async function loadCluster() {
+  const c = await jget('/api/cluster');
+  const t = c.totals || {};
+  const rows = (c.workers || []).map((w) => `<tr>
+    <td>${esc(w.name)}<div class="mono muted">${esc(w.id)}</div></td>
+    <td class="mono">${esc(w.url)}</td>
+    <td>${esc(w.region || '—')}</td>
+    <td class="mono">${w.artifacts ?? 0}</td>
+    <td class="mono">${w.nodes ?? 0}</td>
+    <td>${statusBadge(w.online)}<div class="muted mono">${esc(timeTxt(w.lastSeen))}</div></td>
+  </tr>`);
+
+  let head = '';
+  if (c.role === 'worker') {
+    const m = c.master || {};
+    head = `<div class="kv" style="margin-bottom:14px">${kv([
+      ['形态', 'worker（边缘托管点）'],
+      ['master', (m.name || '') + ' ' + (m.url || c.self?.url || '')],
+      ['master 在线', m.online ? '是' : '否'],
+      ['最近心跳', timeTxt(c.lastHeartbeat)],
+    ])}</div>` + (c.lastError ? `<div class="err" style="margin-bottom:12px">最近一次心跳错误：${esc(c.lastError)}</div>` : '');
+  }
+  $('clusterBox').innerHTML = head + `<div class="row">
+      <span class="badge dark">${esc(c.role)}</span>
+      <span class="badge">worker ${t.workers ?? 0}（在线 ${t.workersOnline ?? 0}）</span>
+      <span class="badge">托管节点 ${t.hostedNodes ?? 0}</span>
+      <span class="badge">制品 ${t.artifacts ?? 0}</span>
+      <span class="badge">账号 ${t.users ?? 0}</span>
+      <span class="muted mono">TTL ${c.ttlSec}s · 心跳 ${c.everySec}s</span>
+    </div>` + table(['节点', '地址', '区域', '制品', '托管节点', '状态'], rows);
+}
+
+async function loadKinds() {
+  try {
+    const d = await jget('/api/registry/kinds');
+    const sel = $('kind');
+    (d.kinds || []).forEach((k) => {
+      const o = document.createElement('option');
+      o.value = k.kind;
+      o.textContent = `${k.label || k.kind}${k.published ? ' · ' + k.published : ''}`;
+      sel.appendChild(o);
+    });
+  } catch (e) { /* 目录还没起来也不影响其它区块 */ }
+}
+
+async function loadDirectory() {
+  const q = encodeURIComponent($('q').value.trim());
+  const kind = encodeURIComponent($('kind').value);
+  const d = await jget(`/api/cluster/directory?q=${q}&kind=${kind}`);
+  $('dirMeta').textContent = `${d.total} 条（本地 ${d.local} · 远端 ${d.remote}）`;
+  const rows = (d.items || []).map((it) => {
+    const via = it.via || {};
+    const viaTxt = via.role === 'self' ? '本节点' : 'worker ' + (via.nodeName || via.nodeId || '');
+    const tags = (it.tags || []).map((t) => `<span class="tag">${esc(t)}</span>`).join('');
+    const replicas = (it.replicas || []).length
+      ? `<span class="badge">副本 ×${it.replicas.length}</span>`
+      : (it.origin === 'replica' ? '<span class="badge">副本</span>' : '');
+    return `<tr>
+      <td class="mono">${esc(it.ref || '')}<div class="muted">${esc(it.name || '')}</div></td>
+      <td><span class="badge">${esc(it.kind || '')}</span>${replicas}</td>
+      <td>${esc(it.summary || '')}${tags ? '<div style="margin-top:5px">' + tags + '</div>' : ''}</td>
+      <td class="mono">${esc(viaTxt)}</td>
+      <td class="mono">${sizeTxt(it.storage?.size)}</td>
+      <td class="mono">${it.downloads ?? 0}</td>
+    </tr>`;
+  });
+  $('dirBox').innerHTML = table(['引用', '类型', '说明', '来源', '大小', '下载'], rows);
+}
+
+async function loadConfigKinds() {
+  try {
+    const d = await jget('/api/configs/kinds');
+    const kind = $('cfgKind'), env = $('cfgEnv');
+    (d.kinds || []).forEach((k) => {
+      const o = document.createElement('option');
+      o.value = k.kind;
+      o.textContent = `${k.label || k.kind}${k.count ? ' · ' + k.count : ''}`;
+      kind.appendChild(o);
+    });
+    (d.envs || []).forEach((e) => {
+      const o = document.createElement('option');
+      o.value = e;
+      o.textContent = `${e}${d.envCounts?.[e] ? ' · ' + d.envCounts[e] : ''}`;
+      env.appendChild(o);
+    });
+  } catch (e) { /* 旧节点没有这个接口也不影响其它区块 */ }
+}
+
+async function loadConfigs() {
+  const kind = encodeURIComponent($('cfgKind').value);
+  const env = encodeURIComponent($('cfgEnv').value);
+  const qs = [kind && `kind=${kind}`, env && `env=${env}`].filter(Boolean).join('&');
+  const d = await jget('/api/configs' + (qs ? '?' + qs : ''));
+  $('cfgMeta').textContent = `${d.total} 条${d.total ? ' · 非公开配置需凭据与授权' : ''}`;
+  const rows = (d.configs || []).map((c) => `<tr>
+    <td class="mono">${esc(c.ref)}<div class="muted">${esc(c.name)}</div></td>
+    <td><span class="badge">${esc(c.kind)}</span>${c.secret ? '<span class="badge dark" title="内容静态加密">敏感</span>' : ''}</td>
+    <td>${esc(c.environment)}</td>
+    <td class="mono">${esc(c.format)}</td>
+    <td class="mono">v${c.revision}</td>
+    <td class="mono">${sizeTxt(c.size)}</td>
+    <td class="mono" title="${esc(c.checksum)}">${esc((c.checksum || '').slice(0, 12))}…</td>
+    <td>${esc(timeTxt(c.updatedAt))}</td>
+  </tr>`);
+  $('cfgBox').innerHTML = table(['引用', '类型', '环境', '格式', '版本', '大小', '校验和', '更新于'], rows);
+}
+
+async function loadNodes() {
+  const d = await jget('/api/nodes/discover');
+  const regions = await jget('/api/nodes/regions').catch(() => ({ regions: [] }));
+  const chips = (regions.regions || []).map((r) => `<span class="badge">${esc(r.region)} ${r.online}/${r.total} 在线</span>`).join(' ');
+  const rows = (d.nodes || []).map((n) => `<tr>
+    <td>${esc(n.name)}<div class="mono muted">@${esc(n.namespace?.slug || '')}/${esc(n.slug)}</div></td>
+    <td><span class="badge">${esc(n.kind)}</span></td>
+    <td>${esc(n.region || '—')}</td>
+    <td>${esc(n.owner?.name || '')}</td>
+    <td class="mono">${(n.capabilities || []).join(', ') || '—'}</td>
+    <td>${statusBadge(n.online)}</td>
+  </tr>`);
+  $('nodesBox').innerHTML = (chips ? `<div class="row">${chips}</div>` : '') +
+    table(['节点', '类型', '区域', '归属', '能力', '状态'], rows);
+}
+
+async function refresh() {
+  const tasks = [loadSelf(), loadCluster(), loadDirectory(), loadConfigs(), loadNodes(), loadAdmin().catch(() => {})];
+  const results = await Promise.allSettled(tasks);
+  const failed = results.filter((r) => r.status === 'rejected');
+  if (failed.length && failed.length === results.length) {
+    $('selfBox').innerHTML = `<div class="empty">无法连接本节点 API：${esc(failed[0].reason.message)}</div>`;
+  }
+}
+
+/* ---------------- 节点管理（管理员） ----------------
+   凭据只留在本机浏览器：管理面与普通浏览是两套身份，控制台不代给任何人授权。 */
+const ADM_KEY = 'nccr.admin.key';
+const ADM_SEC = 'nccr.admin.secret';
+
+function admCreds() {
+  return { key: localStorage.getItem(ADM_KEY) || '', secret: localStorage.getItem(ADM_SEC) || '' };
+}
+
+async function admFetch(path, method = 'GET', body) {
+  const c = admCreds();
+  const r = await fetch(path, {
+    method,
+    headers: Object.assign(
+      { Accept: 'application/json', 'X-NCC-Admin-Key': c.key, 'X-NCC-Admin-Secret': c.secret },
+      body ? { 'Content-Type': 'application/json' } : {},
+    ),
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const text = await r.text();
+  let data = {};
+  try { data = text ? JSON.parse(text) : {}; } catch (e) { data = { _raw: text }; }
+  if (!r.ok) throw new Error((data.error && data.error.message) || ('HTTP ' + r.status));
+  return data;
+}
+
+function admMsg(t) { $('admMsg').textContent = t || ''; }
+
+async function loadAdmin() {
+  const c = admCreds();
+  if (!c.key || !c.secret) { admLocked('没有本机凭据：填上 admin key/secret，或用管理员账号登录 CLI 后用 ncc registry admin …'); return; }
+  try {
+    const q = encodeURIComponent($('admQ').value.trim());
+    const [ov, users, nodes, svcs, shares, keys, audit] = await Promise.all([
+      admFetch('/api/admin/overview'),
+      admFetch('/api/admin/users?limit=50&q=' + q),
+      admFetch('/api/admin/nodes?limit=50&q=' + q),
+      admFetch('/api/admin/services?limit=50&q=' + q),
+      admFetch('/api/shares?all=1&limit=50'),
+      admFetch('/api/admin/keys'),
+      admFetch('/api/admin/audit?limit=20' + (q ? '&action=' + q : '')),
+    ]);
+    admUnlock(ov, users, nodes, svcs, shares, keys, audit);
+  } catch (e) {
+    admLocked('管理员凭据不可用：' + e.message);
+  }
+}
+
+function admLocked(msg) {
+  $('admGate').textContent = msg;
+  $('admGate').style.display = '';
+  $('admBox').style.display = 'none';
+  $('admMeta').textContent = '';
+}
+
+function admUnlock(ov, users, nodes, svcs, shares, keys, audit) {
+  $('admGate').style.display = 'none';
+  $('admBox').style.display = '';
+  const c = ov.counts || {};
+  $('admMeta').textContent = '凭据 ' + (ov.credential?.name || '') + ' · ' + (ov.credential?.kind || '');
+  $('admKv').innerHTML = kv([
+    ['用户', `${c.users ?? 0}（管理员 ${c.admins ?? 0}）`],
+    ['节点', `${c.nodes ?? 0}（service ${c.nodeKinds?.service ?? 0} · agent ${c.nodeKinds?.agent ?? 0}）`],
+    ['服务', `${(c.services?.hostedNodes ?? 0) + (c.services?.artifacts ?? 0)}（节点 ${c.services?.hostedNodes ?? 0} · 制品 ${c.services?.artifacts ?? 0}）`],
+    ['制品', c.artifacts ?? 0],
+    ['配置', c.configs ?? 0],
+    ['分享（有效）', `${c.activeShares ?? 0} / ${c.shares ?? 0}`],
+    ['审计条目', c.auditActions ?? 0],
+  ]);
+
+  const urows = (users.users || []).map((u) => `<tr>
+    <td>${esc(u.email)}<div class="mono muted">${esc(u.id)}</div></td>
+    <td>${esc(u.name)}</td>
+    <td>${u.isAdmin ? '<span class="badge dark">管理员</span>' : '<span class="badge">成员</span>'}</td>
+    <td>${u.disabled ? '<span class="badge off">已禁用</span>' : '<span class="badge ok">正常</span>'}${u.adminNote ? '<div class="muted">' + esc(u.adminNote) + '</div>' : ''}</td>
+    <td class="mono">${u.stats?.nodes ?? 0} / ${u.stats?.artifacts ?? 0}</td>
+    <td class="mono">${esc(timeTxt(u.lastLoginAt))}</td>
+    <td><div class="acts">
+      <button data-act="user-toggle" data-id="${esc(u.id)}" data-next="${u.disabled ? '0' : '1'}" data-email="${esc(u.email)}">${u.disabled ? '启用' : '禁用'}</button>
+      <button data-act="user-passwd" data-id="${esc(u.id)}" data-email="${esc(u.email)}">重置密码</button>
+    </div></td>
+  </tr>`);
+  $('admUsers').innerHTML = table(['账号', '姓名', '角色', '状态', '节点/制品', '最近登录', '操作'], urows);
+
+  const nrows = (nodes.nodes || []).map((n) => `<tr>
+    <td>${esc(n.name)}<div class="mono muted">${esc(n.id)}</div></td>
+    <td><span class="badge">${esc(n.kind)}</span></td>
+    <td>${esc(n.region || '—')}</td>
+    <td class="mono">@${esc(n.namespace?.slug || '')}<div class="muted">${esc(n.ownerEmail || '')}</div></td>
+    <td>${statusBadge(n.online)}<div class="mono muted">${esc(timeTxt(n.lastSeen))}</div></td>
+    <td><div class="acts"><button class="danger" data-act="node-rm" data-id="${esc(n.id)}" data-name="${esc(n.name)}">摘除</button></div></td>
+  </tr>`);
+  $('admNodes').innerHTML = table(['节点', '类型', '区域', '归属', '状态', '操作'], nrows);
+
+  const srows = (svcs.nodeServices || []).map((n) => `<tr>
+    <td>${esc(n.name)}<div class="mono muted">${esc(n.id)}</div></td>
+    <td><span class="badge dark">节点</span></td>
+    <td>${esc(n.region || '—')}</td>
+    <td class="mono">@${esc(n.namespace?.slug || '')} · ${esc(n.ownerEmail || '')}</td>
+    <td>${statusBadge(n.online)}</td>
+    <td><div class="acts"><button class="danger" data-act="service-rm" data-ref="${esc(n.id)}" data-name="${esc(n.name)}">摘除</button></div></td>
+  </tr>`).concat((svcs.apiArtifacts || []).map((a) => `<tr>
+    <td>${esc(a.name)}<div class="mono muted">${esc(a.ref)}</div></td>
+    <td><span class="badge">制品</span></td>
+    <td>${esc(a.status || '')}</td>
+    <td class="mono">@${esc(a.namespace?.slug || '')}</td>
+    <td class="mono">${sizeTxt(a.storage?.size)}</td>
+    <td><div class="acts"><button class="danger" data-act="service-rm" data-ref="${esc('@' + (a.namespace?.slug || '') + '/' + (a.slug || ''))}" data-name="${esc(a.name)}">归档</button></div></td>
+  </tr>`));
+  $('admServices').innerHTML = table(['服务', '来源', '区域/状态', '归属', '在线/大小', '操作'], srows);
+
+  const shrows = (shares.shares || []).map((s) => `<tr>
+    <td class="mono">${esc(s.id)}<div class="muted">${esc(s.hint)}…</div></td>
+    <td class="mono">${esc(s.artifact?.ref || '')}</td>
+    <td>${esc(s.createdBy?.name || '')}</td>
+    <td>${s.usable ? '<span class="badge ok">有效</span>' : '<span class="badge off">已失效</span>'}</td>
+    <td class="mono">${s.uses?.used ?? 0}${s.uses?.max ? '/' + s.uses.max : ''} 次</td>
+    <td class="mono">${s.expiresAt ? esc(timeTxt(s.expiresAt)) : '不过期'}</td>
+    <td><div class="acts"><button class="danger" data-act="share-rm" data-id="${esc(s.id)}" ${s.usable ? '' : 'disabled'}>撤销</button></div></td>
+  </tr>`);
+  $('admShares').innerHTML = table(['分享', '制品', '创建者', '状态', '用量', '到期', '操作'], shrows);
+
+  const krows = (keys.keys || []).map((k) => `<tr>
+    <td class="mono">${esc(k.key)}</td>
+    <td>${esc(k.label || '—')}</td>
+    <td>${k.active ? '<span class="badge ok">可用</span>' : '<span class="badge off">已撤销</span>'}</td>
+    <td class="mono">${esc(timeTxt(k.lastUsedAt))}</td>
+  </tr>`);
+  $('admKeys').innerHTML = table(['key', '标签', '状态', '最近使用'], krows) +
+    '<div class="row" style="margin-top:10px"><button class="danger" id="admRotate">轮换 admin key/secret（旧的立即失效）</button></div>';
+
+  const arows = (audit.audit || []).map((a) => `<tr>
+    <td class="mono">${esc(timeTxt(a.createdAt))}</td>
+    <td class="mono">${esc(a.action)}</td>
+    <td>${esc(a.actor?.name || '')}<div class="muted mono">${esc(a.actor?.kind || '')}</div></td>
+    <td>${esc(a.summary || '')}<div class="muted mono">${esc(a.targetName || a.target || '')}</div></td>
+    <td class="mono">${esc(a.ip || '')}</td>
+  </tr>`);
+  $('admAudit').innerHTML = table(['时间', '动作', '操作者', '说明', 'IP'], arows);
+
+  $('admRotate').addEventListener('click', () => armConfirm($('admRotate'), '轮换后旧 secret 立即失效，本机保存的凭据也需要更新。', async () => {
+    try {
+      const r = await admFetch('/api/admin/keys/rotate?label=console', 'POST', {});
+      localStorage.setItem(ADM_KEY, r.key.key);
+      localStorage.setItem(ADM_SEC, r.secret);
+      $('admKey').value = r.key.key;
+      $('admSecret').value = r.secret;
+      admOut(`新 key <b>${esc(r.key.key)}</b> · secret <b>${esc(r.secret)}</b>（已写入本机浏览器，请另行保存）`);
+      admMsg('已轮换，撤销旧凭据 ' + (r.revoked ?? 0) + ' 份');
+      await loadAdmin();
+    } catch (e) { admMsg('轮换失败：' + e.message); }
+  }));
+}
+
+/* 行内二次确认：不用 window.confirm —— 它在一部分内置浏览器里被禁用，
+   而管理动作不能因此卡住。第一次点“确认”，第二次真执行（改成点别处则会退回）。 */
+let armed = null;
+
+function armConfirm(btn, hint, run) {
+  if (armed && armed.btn === btn) {
+    armed = null;
+    btn.textContent = btn.dataset.raw || btn.textContent;
+    btn.classList.remove('arming');
+    run();
+    return;
+  }
+  if (armed) armConfirm(armed.btn, '', () => {}); // 先撤掉上一个未确认的
+  armed = { btn, run };
+  btn.dataset.raw = btn.dataset.raw || btn.textContent;
+  btn.textContent = '确认？';
+  if (hint) admMsg(hint + ' — 再点一次“确认？”执行');
+}
+
+function admOut(html) {
+  $('admOut').innerHTML = html ? `<div class="pwbox">${html}</div>` : '';
+}
+
+function bindAdmin() {
+  // 保存过的凭据回填到输入框（只是方便，不入任何日志）。
+  const c = admCreds();
+  $('admKey').value = c.key;
+  $('admSecret').value = c.secret;
+  $('admConnect').addEventListener('click', async () => {
+    localStorage.setItem(ADM_KEY, $('admKey').value.trim());
+    localStorage.setItem(ADM_SEC, $('admSecret').value.trim());
+    admMsg('');
+    await loadAdmin();
+  });
+  $('admClear').addEventListener('click', () => {
+    localStorage.removeItem(ADM_KEY);
+    localStorage.removeItem(ADM_SEC);
+    $('admKey').value = '';
+    $('admSecret').value = '';
+    admLocked('已清除本机凭据。');
+  });
+  $('admSearch').addEventListener('click', () => loadAdmin().catch((e) => admMsg(e.message)));
+  $('admQ').addEventListener('keydown', (e) => { if (e.key === 'Enter') loadAdmin().catch((x) => admMsg(x.message)); });
+
+  // 表格里的动作按钮（事件委派：列表会整体重绘）。
+  $('admBox').addEventListener('click', (ev) => {
+    const b = ev.target.closest('button[data-act]');
+    if (!b) return;
+    const act = b.dataset.act;
+    admMsg('');
+    admOut('');
+    if (act === 'user-toggle') {
+      const off = b.dataset.next === '1';
+      if (off) armConfirm(b, `禁用 ${b.dataset.email} 后旧令牌立即失效`, () => actUserToggle(b, off));
+      else actUserToggle(b, off);
+      return;
+    }
+    const labels = {
+      'user-passwd': `重置 ${b.dataset.email} 的密码`,
+      'node-rm': `摘除节点 ${b.dataset.name}`,
+      'service-rm': `处理 ${b.dataset.name}（节点侧摘除 / 制品侧归档）`,
+      'share-rm': `撤销分享 ${b.dataset.id}，对方立即取不到`,
+    };
+    armConfirm(b, labels[act] || '确认执行', () => actAdmin(act, b));
+  });
+}
+
+async function actUserToggle(b, off) {
+  try {
+    // 禁用原因取工具栏输入框（不用 prompt：部分内置浏览器直接禁用）
+    const note = off ? $('admNote').value.trim() : undefined;
+    await admFetch('/api/admin/users/' + encodeURIComponent(b.dataset.id), 'PATCH', { disabled: off, adminNote: note });
+    admMsg(`${b.dataset.email} 已${off ? '禁用' : '启用'}`);
+  } catch (e) {
+    admMsg(e.message);
+  }
+  await loadAdmin().catch((e) => admMsg(e.message));
+}
+
+async function actAdmin(act, b) {
+  try {
+    if (act === 'user-passwd') {
+      const r = await admFetch('/api/admin/users/' + encodeURIComponent(b.dataset.id) + '/password', 'POST', {});
+      // 密码不能只弹一次就走（alert 也可能不可用）：留在页面上直到刷新。
+      admOut(`${esc(r.email)} 的新密码：<b>${esc(r.password)}</b><div style="font-family:var(--sans);color:var(--ink2);margin-top:6px">只显示这一次，请立刻告知本人并让其自行修改。</div>`);
+      admMsg('已重置密码');
+    } else if (act === 'node-rm') {
+      await admFetch('/api/admin/nodes/' + encodeURIComponent(b.dataset.id), 'DELETE');
+      admMsg(`节点 ${b.dataset.name} 已摘除`);
+    } else if (act === 'service-rm') {
+      const r = await admFetch('/api/admin/services/' + b.dataset.ref, 'DELETE');
+      admMsg(`${b.dataset.name} 已${r.target === 'artifact' ? '归档' : '摘除'}`);
+    } else if (act === 'share-rm') {
+      await admFetch('/api/shares/' + encodeURIComponent(b.dataset.id), 'DELETE');
+      admMsg('分享已撤销');
+    }
+  } catch (e) {
+    admMsg(e.message);
+  }
+  await loadAdmin().catch((e) => admMsg(e.message));
+}
+
+$('refresh').addEventListener('click', refresh);
+$('search').addEventListener('click', () => loadDirectory().catch(() => {}));
+$('q').addEventListener('keydown', (e) => { if (e.key === 'Enter') loadDirectory().catch(() => {}); });
+$('kind').addEventListener('change', () => loadDirectory().catch(() => {}));
+$('cfgSearch').addEventListener('click', () => loadConfigs().catch(() => {}));
+$('cfgKind').addEventListener('change', () => loadConfigs().catch(() => {}));
+$('cfgEnv').addEventListener('change', () => loadConfigs().catch(() => {}));
+
+loadKinds();
+loadConfigKinds();
+bindAdmin();
+refresh();
+setInterval(() => { loadCluster().catch(() => {}); }, 15000);
+</script>
+</body>
+</html>
