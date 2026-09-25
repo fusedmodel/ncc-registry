@@ -287,6 +287,7 @@ async function loadSelf() {
     `GET  /api/admin/audit                            (审计日志)`,
     `POST /api/registry/uploads   (raw + X-Filename)`,
     `POST /api/registry           (create item, replicate=all)`,
+    `PUT  /api/registry/@ns/slug/signature (加签：只收 signature，需 keynum)`,
     `DELETE /api/registry/@ns/slug (下架 + 回收副本)`,
     `POST /api/nodes/heartbeat    (节点注册+心跳)`,
     `GET  /api/nodes/discover?kind=agent&region=`,
@@ -361,9 +362,15 @@ async function loadDirectory() {
     const replicas = (it.replicas || []).length
       ? `<span class="badge">副本 ×${it.replicas.length}</span>`
       : (it.origin === 'replica' ? '<span class="badge">副本</span>' : '');
+    // 签名在发布者机器上做，这里只如实展示「有没有签名、指纹是什么」。
+    // 远端条目（worker 上报）没有 manifest，所以不显示 —— 不显示不等于没签。
+    const sig = it.manifest?.hur?.signature || null;
+    const sigBadge = sig
+      ? `<span class="badge dark" title="keynum ${esc(sig.keynum || '')}">已签名${sig.url ? '' : '·仅指纹'}</span>`
+      : '';
     return `<tr>
       <td class="mono">${esc(it.ref || '')}<div class="muted">${esc(it.name || '')}</div></td>
-      <td><span class="badge">${esc(it.kind || '')}</span>${replicas}</td>
+      <td><span class="badge">${esc(it.kind || '')}</span>${replicas}${sigBadge}</td>
       <td>${esc(it.summary || '')}${tags ? '<div style="margin-top:5px">' + tags + '</div>' : ''}</td>
       <td class="mono">${esc(viaTxt)}</td>
       <td class="mono">${sizeTxt(it.storage?.size)}</td>

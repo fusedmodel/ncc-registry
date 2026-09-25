@@ -103,6 +103,10 @@ func NewServer(cfg *config.Config, st *store.Store, blob storage.Storage) (*Serv
 	reg.GET("/:id/:slug/bytes", s.bytes)
 	reg.PATCH("/:id", requireScope("registry:publish"), s.patchItem)
 	reg.PATCH("/:id/:slug", requireScope("registry:publish"), s.patchItem)
+	// 加签：给已发布的 hur 制品附着/替换签名（签在本地做，这里只接收并无损落盘）。
+	// 两种引用形态各注册一次，与上面的 PATCH/download 同构。
+	reg.PUT("/:id/signature", requireScope("registry:publish"), s.attachSignature)
+	reg.PUT("/:id/:slug/signature", requireScope("registry:publish"), s.attachSignature)
 	reg.DELETE("/:id", requireScope("registry:publish"), s.deleteItem)
 	reg.DELETE("/:id/:slug", requireScope("registry:publish"), s.deleteItem)
 	reg.GET("/:id/:slug", s.getItem)
@@ -112,6 +116,8 @@ func NewServer(cfg *config.Config, st *store.Store, blob storage.Storage) (*Serv
 	nodes.GET("", s.listNodes)
 	nodes.GET("/", s.listNodes)
 	nodes.GET("/kinds", s.nodeKinds)
+	// 节点「提供能力」词表（run:wasm / egress:llm / serve:mcp …）——检索用 ?can= 的时候取值来源
+	nodes.GET("/offers", s.nodeOffers)
 	nodes.GET("/discover", s.discoverNodes)
 	nodes.GET("/regions", s.nodeRegions)
 	nodes.GET("/route", s.clusterRoute)

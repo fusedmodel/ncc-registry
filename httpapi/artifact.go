@@ -411,6 +411,17 @@ func (s *Server) createItem(c *gin.Context) {
 				return
 			}
 		}
+		// hur 制品要求自描述：没有清单就做不了摘要交叉核对，
+		// 也就分不清「这份签名是不是这份产物的」。
+		if body.Kind == "hur" {
+			if code, msg := validateHurManifest(body.Manifest, body.Storage.SHA256); code != "" {
+				fail(c, 400, code, msg)
+				return
+			}
+		}
+	} else if body.Kind == "hur" {
+		fail(c, 400, "bad_manifest", "kind=hur 必须提供 manifest.hur（用 `ncc hur publish` 会自动带上）")
+		return
 	}
 
 	provider := "byo"

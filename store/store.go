@@ -552,7 +552,9 @@ type UpsertNodeInput struct {
 	Version      string
 	Agent        string
 	Capabilities []string
-	Visibility   string
+	// OffersVerified 本机**自证**的提供能力（不是运营者自选的，是由硬事实推导出来的）。
+	OffersVerified []string
+	Visibility     string
 }
 
 // UpsertHostedNode 注册与心跳合并：同 namespace+slug 则续租，否则新建。
@@ -585,6 +587,7 @@ func (s *Store) UpsertHostedNode(in UpsertNodeInput) (*model.HostedNode, bool, e
 	n.Version = in.Version
 	n.Agent = in.Agent
 	n.Capabilities = marshalList(in.Capabilities)
+	n.OffersVerified = marshalList(in.OffersVerified)
 	n.Visibility = vis
 	n.LastSeen = time.Now()
 
@@ -592,7 +595,7 @@ func (s *Store) UpsertHostedNode(in UpsertNodeInput) (*model.HostedNode, bool, e
 		Columns: []clause.Column{{Name: "namespace_id"}, {Name: "slug"}},
 		DoUpdates: clause.AssignmentColumns([]string{
 			"name", "kind", "region", "url", "os", "arch", "version", "agent",
-			"capabilities", "visibility", "last_seen", "updated_at",
+			"capabilities", "offers_verified", "visibility", "last_seen", "updated_at",
 		}),
 	}).Create(&n).Error; err != nil {
 		return nil, false, err
@@ -654,7 +657,7 @@ func (s *Store) ListLinkedNodes(ownerID string) ([]NodeRow, error) {
 
 // ListPublicNodes 本实例上可被发现的节点（排除我自己的）。
 // grantedOwners：拿到过 node 授权的人 —— 他们的私有节点也应当对我可见。
-func (s *Store) ListPublicNodes(ownerID string, grantedOwners []string, kind, region, q string, limit int) ([]NodeRow, error) {
+func (s *Store) ListPublicNodes(ownerID string, grantedOwners []string, kind, region, q string, offers []model.OfferQuery, limit int) ([]NodeRow, error) {
 	query := s.nodeQuery(ownerID).
 		Where("hosted_nodes.namespace_id NOT IN (SELECT id FROM namespaces WHERE owner_id = ?)", ownerID)
 	if len(grantedOwners) > 0 {
@@ -672,12 +675,44 @@ func (s *Store) ListPublicNodes(ownerID string, grantedOwners []string, kind, re
 		like := "%" + q + "%"
 		query = query.Where("hosted_nodes.name LIKE ? OR hosted_nodes.slug LIKE ?", like, like)
 	}
+	query = whereNodeOffers(query, offers)
 	if limit <= 0 || limit > 200 {
 		limit = 100
 	}
 	var rows []NodeRow
 	err := query.Order("hosted_nodes.last_seen DESC").Limit(limit).Scan(&rows).Error
 	return rows, err
+}
+
+// whereNodeOffers 给节点查询加上「声明/自证里含这些能力」的条件。
+//
+// 每条能力内部是「规范 id 或某个历史别名」的或，能力之间是且。`@verified` 的只查自证列；
+// 不带限定符的查**两列** —— 自证比声明强，一个只在自证列表里的能力也应该被 `can=X` 命中。
+//
+// capabilities / offers_verified 都是 JSON 数组字符串（["mcp","api"]），
+// 所以用带引号的 LIKE：`%"mcp"%` 不会误命中 `"mcp-server"`。库里可能还存着老节点上报的
+// 短名，因此候选集里同时包含规范 id 与别名（model.OfferAlternatives）。
+func whereNodeOffers(query *gorm.DB, offers []model.OfferQuery) *gorm.DB {
+	for _, o := range offers {
+		alts := model.OfferAlternatives(o.ID)
+		if len(alts) == 0 {
+			continue
+		}
+		cols := []string{"hosted_nodes.capabilities", "hosted_nodes.offers_verified"}
+		if o.VerifiedOnly {
+			cols = []string{"hosted_nodes.offers_verified"}
+		}
+		ors := make([]string, 0, len(alts)*len(cols))
+		args := make([]any, 0, len(alts)*len(cols))
+		for _, c := range cols {
+			for _, a := range alts {
+				ors = append(ors, c+" LIKE ?")
+				args = append(args, "%\""+a+"\"%")
+			}
+		}
+		query = query.Where("("+strings.Join(ors, " OR ")+")", args...)
+	}
+	return query
 }
 
 func (s *Store) FindNodeRow(id string, ownerID string) (*NodeRow, error) {

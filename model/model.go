@@ -22,7 +22,7 @@ var ArtifactKinds = []string{
 var KindMeta = map[string][2]string{
 	"api":          {"API", "可调用的服务接口"},
 	"harness":      {"Harness", "按契约可装载的能力封装（含 loader/entry）"},
-	"hur":          {"HUR", "Harness Use Runtime 制品"},
+	"hur":          {"HUR", "Harness-Use Runtime 官方包（kind=agent 的包就是一个 Agent）"},
 	"skill":        {"Skill", "给 Agent 的操作手册（SKILL.md）"},
 	"mcp":          {"MCP", "Model Context Protocol 服务"},
 	"plugin":       {"Plugin", "宿主应用的插件"},
@@ -182,22 +182,25 @@ func ValidNodeKind(k string) bool {
 
 // HostedNode 被托管的节点：注册与心跳合并（同一 namespace+slug 续租 LastSeen）。
 type HostedNode struct {
-	ID           string    `gorm:"primaryKey"`
-	NamespaceID  string    `gorm:"not null;index;uniqueIndex:idx_node_ns_slug"`
-	Slug         string    `gorm:"not null;uniqueIndex:idx_node_ns_slug"`
-	Name         string    `gorm:"not null"`
-	Kind         string    `gorm:"not null;default:service;index"`
-	Region       string    `gorm:"not null;default:'';index"`
-	URL          string    `gorm:"not null;default:''"`
-	OS           string    `gorm:"not null;default:''"`
-	Arch         string    `gorm:"not null;default:''"`
-	Version      string    `gorm:"not null;default:''"`
-	Agent        string    `gorm:"not null;default:''"` // 跑在哪个 Agent 形态里（可选）
-	Capabilities string    `gorm:"not null;default:[]"`
-	Visibility   string    `gorm:"not null;default:public"`
-	LastSeen     time.Time `gorm:"index"`
-	CreatedAt    time.Time `gorm:"autoCreateTime"`
-	UpdatedAt    time.Time `gorm:"autoUpdateTime"`
+	ID           string `gorm:"primaryKey"`
+	NamespaceID  string `gorm:"not null;index;uniqueIndex:idx_node_ns_slug"`
+	Slug         string `gorm:"not null;uniqueIndex:idx_node_ns_slug"`
+	Name         string `gorm:"not null"`
+	Kind         string `gorm:"not null;default:service;index"`
+	Region       string `gorm:"not null;default:'';index"`
+	URL          string `gorm:"not null;default:''"`
+	OS           string `gorm:"not null;default:''"`
+	Arch         string `gorm:"not null;default:''"`
+	Version      string `gorm:"not null;default:''"`
+	Agent        string `gorm:"not null;default:''"` // 跑在哪个 Agent 形态里（可选）
+	Capabilities string `gorm:"not null;default:[]"`
+	// OffersVerified JSON string[] —— 节点能**自证**的提供能力（本机事实推导，不是自选的）。
+	// 检索用 `?can=<id>@verified`，见 model.ParseOfferQuery。
+	OffersVerified string    `gorm:"not null;default:[]"`
+	Visibility     string    `gorm:"not null;default:public"`
+	LastSeen       time.Time `gorm:"index"`
+	CreatedAt      time.Time `gorm:"autoCreateTime"`
+	UpdatedAt      time.Time `gorm:"autoUpdateTime"`
 }
 
 func (HostedNode) TableName() string { return "hosted_nodes" }

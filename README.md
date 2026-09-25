@@ -443,6 +443,7 @@ ncc registry rm @alice/x --yes                                         # 下架 
 | `GET /api/namespaces/mine` · `POST /api/namespaces` | 我的命名空间 / 建组织命名空间 |
 | `POST /api/registry/uploads` | 上传字节（raw body + `X-Filename`；响应含 `sha256`） |
 | `POST /api/registry` · `PATCH/DELETE /api/registry/<ref>` | 创建 / 修改 / 删除条目 |
+| `PUT /api/registry/<ref>/signature` | **加签**：给已发布的 `kind=hur` 制品附着/替换签名（只收 `signature` 对象；签在客户端做，本节点只做摘要核对并无损落盘） |
 | `GET /api/nodes` | 我的托管节点 + 我连接的节点 |
 | `POST /api/nodes/heartbeat`（别名 `POST /api/namespaces/living`） | 托管节点注册 + 心跳 |
 | `DELETE /api/nodes/:id` | 下线我的节点 |

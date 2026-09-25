@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -8,6 +9,97 @@ import (
 	"github.com/fusedmodel/ncc-registry/model"
 	"github.com/fusedmodel/ncc-registry/store"
 )
+
+/* ---------------- 提供能力（offers） ---------------- */
+
+// nodeOffers GET /api/nodes/offers —— 节点「提供能力」词表。
+//
+// 与 /api/nodes/kinds 并列：kinds 回答「它是什么」（service / agent / assigned），
+// offers 回答「它能提供什么」（跑什么、有没有出口、托管什么）。
+// 检索入口：/api/nodes/discover?can=run:wasm&can=egress:llm（**全都要**）。
+func (s *Server) nodeOffers(c *gin.Context) {
+	list := make([]gin.H, 0, len(model.NodeOffers))
+	for _, o := range model.NodeOffers {
+		list = append(list, gin.H{
+			"id": o.ID, "zh": o.Zh, "en": o.En, "descZh": o.Desc, "descEn": o.DescEn,
+		})
+	}
+	aliases := model.OfferAliases()
+	aliasOut := make([]gin.H, 0, len(aliases))
+	for _, a := range aliases {
+		aliasOut = append(aliasOut, gin.H{"from": a.From, "to": a.To})
+	}
+	ok(c, 200, gin.H{
+		"offers": list, "total": len(list), "aliases": aliasOut,
+		"note": "上报：ncc living --name x --kind service --capabilities run:wasm,egress:llm；" +
+			"历史短名（mcp / api / wasm / llm …）会被归一成规范 id；不在词表里的 id 原样保留。" +
+			"检索 ?can= 是「全都要」；未在词表里的 id 也照旧能精确搜到。" +
+			"另可在 id 后加 @verified（如 can=run:wasm@verified）——只要**自证**具备该能力的节点；" +
+			"自证同样比声明强：can=X 也匹配只把 X 放在自证里的节点。",
+	})
+}
+
+// offerEcho 把解析后的条件还原成 `id` / `id@verified`，用于响应回显。
+func offerEcho(qs []model.OfferQuery) []string {
+	out := make([]string, 0, len(qs))
+	for _, q := range qs {
+		if q.VerifiedOnly {
+			out = append(out, q.ID+"@verified")
+			continue
+		}
+		out = append(out, q.ID)
+	}
+	return out
+}
+
+// offerQuery 解析 `?can=`：可重复传，也可用逗号分隔。
+// 语法 `<id>`（声明或自证）或 `<id>@verified`（只要自证的），见 model.ParseOfferQuery。
+func offerQuery(c *gin.Context) []model.OfferQuery {
+	var out []model.OfferQuery
+	seen := map[string]bool{}
+	for _, raw := range c.QueryArray("can") {
+		for _, part := range strings.Split(raw, ",") {
+			q := model.ParseOfferQuery(part)
+			if q.ID == "" {
+				continue
+			}
+			key := fmt.Sprintf("%s|%v", q.ID, q.VerifiedOnly)
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			out = append(out, q)
+		}
+	}
+	return out
+}
+
+// hasAllOffers 节点是否同时满足每一条：`<id>` = 声明**或**自证里有；`<id>@verified` = 自证里才有。
+func hasAllOffers(caps, verified string, want []model.OfferQuery) bool {
+	if len(want) == 0 {
+		return true
+	}
+	set := func(csv string) map[string]bool {
+		m := map[string]bool{}
+		for _, v := range model.NormalizeOffers(store.ParseList(csv)) {
+			m[v] = true
+		}
+		return m
+	}
+	declared, proved := set(caps), set(verified)
+	for _, w := range want {
+		if w.VerifiedOnly {
+			if !proved[w.ID] {
+				return false
+			}
+			continue
+		}
+		if !declared[w.ID] && !proved[w.ID] {
+			return false
+		}
+	}
+	return true
+}
 
 /* ---------------- 节点上报（注册 + 心跳合并） ---------------- */
 
@@ -22,7 +114,11 @@ type nodeHeartbeatReq struct {
 	Version      string   `json:"version"`
 	Agent        string   `json:"agent"`
 	Capabilities []string `json:"capabilities"`
-	Visibility   string   `json:"visibility"`
+	// OffersVerified 本机**自证**的提供能力（客户端由硬事实推导出来的，不是运营者自选）。
+	// 服务端只如实收下并按 `?can=<id>@verified` 检索，不做任何验证 ——
+	// 「自证」的含义是「节点自己声称有硬证据」，不是「NCC 校验过」。
+	OffersVerified []string `json:"offersVerified"`
+	Visibility     string   `json:"visibility"`
 	// Namespace 目标命名空间 slug（缺省 = 个人命名空间）。
 	Namespace string `json:"namespace"`
 }
@@ -80,7 +176,7 @@ func (s *Server) nodeHeartbeat(c *gin.Context) {
 		NamespaceID: ns.ID, Name: strings.TrimSpace(body.Name), Slug: slug,
 		Kind: body.Kind, Region: strings.TrimSpace(body.Region), URL: strings.TrimSpace(body.URL),
 		OS: body.OS, Arch: body.Arch, Version: body.Version, Agent: body.Agent,
-		Capabilities: body.Capabilities, Visibility: body.Visibility,
+		Capabilities: body.Capabilities, OffersVerified: body.OffersVerified, Visibility: body.Visibility,
 	})
 	if err != nil {
 		fail(c, 500, "internal", "节点上报失败")
@@ -148,6 +244,7 @@ func (s *Server) deleteNode(c *gin.Context) {
 // listNodes GET /api/nodes —— 我的节点 + 我连接的节点。
 func (s *Server) listNodes(c *gin.Context) {
 	a := authOf(c)
+	want := offerQuery(c)
 	nss, err := s.St.NamespacesOfUser(a.UserID)
 	if err != nil {
 		fail(c, 500, "internal", "服务内部错误")
@@ -166,6 +263,9 @@ func (s *Server) listNodes(c *gin.Context) {
 			return
 		}
 		for i := range rows {
+			if !hasAllOffers(rows[i].Capabilities, rows[i].OffersVerified, want) {
+				continue
+			}
 			mine = append(mine, nodeJSON(&rows[i], s.Cfg.NodeTTL))
 		}
 	}
@@ -176,6 +276,9 @@ func (s *Server) listNodes(c *gin.Context) {
 		return
 	}
 	for i := range rows {
+		if !hasAllOffers(rows[i].Capabilities, rows[i].OffersVerified, want) {
+			continue
+		}
 		linked = append(linked, nodeJSON(&rows[i], s.Cfg.NodeTTL))
 	}
 
@@ -208,13 +311,16 @@ func (s *Server) nodeKinds(c *gin.Context) {
 }
 
 // discoverNodes GET /api/nodes/discover —— 本实例上可连接的公开节点。
+//
+// can 可以重复传（或逗号分隔），语义是「**同时具备**这些提供能力」。
 func (s *Server) discoverNodes(c *gin.Context) {
 	a := authOf(c)
 	uid := ""
 	if a != nil {
 		uid = a.UserID
 	}
-	rows, err := s.St.ListPublicNodes(uid, s.grantedOwners(uid), c.Query("kind"), c.Query("region"), c.Query("q"), 100)
+	want := offerQuery(c)
+	rows, err := s.St.ListPublicNodes(uid, s.grantedOwners(uid), c.Query("kind"), c.Query("region"), c.Query("q"), want, 100)
 	if err != nil {
 		fail(c, 500, "internal", "服务内部错误")
 		return
@@ -223,7 +329,7 @@ func (s *Server) discoverNodes(c *gin.Context) {
 	for i := range rows {
 		list = append(list, nodeJSON(&rows[i], s.Cfg.NodeTTL))
 	}
-	ok(c, 200, gin.H{"nodes": list, "total": len(list)})
+	ok(c, 200, gin.H{"nodes": list, "total": len(list), "can": offerEcho(want)})
 }
 
 // nodeRegions GET /api/nodes/regions —— 区域覆盖（Agent 面：按区域找节点）。

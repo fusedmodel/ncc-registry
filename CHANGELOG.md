@@ -10,6 +10,36 @@
 > 与 CLI 共用一份 CHANGELOG。独立出来后**从 `0.1.0` 起走自己的版本线** ——
 > 所以 `0.1.0` 记的是「独立那一刻已经具备的全部能力」，不是新增功能。
 
+---
+
+## [未发布]
+
+### 变更 · `hur` 的 kind 标签对齐写死的 HUR 定义
+
+`HUR` = **Harness-Use Runtime** —— 那是**运行时**（定义：支撑 harness 完成 LLM 调用、工具编排、
+上下文管理、多 provider 接入、运行评估等任务）；`kind=hur` 的条目是**给它用的包**。
+所以标签不再把 HUR 本身叫“包规范”，两端现在给出一模一样的字符串：
+`Harness-Use Runtime 官方包（kind=agent 的包就是一个 Agent）`。
+定义出处：`ncc-platform/prd/ncc-harness.md` §0 📌（写死）。
+
+## [未发布]
+
+### 新增 · HUR 制品：上传校验与「加签」
+
+- **`PUT /api/registry/<ref>/signature`**（需 `registry:publish`）：给**已发布**的 `kind=hur` 制品
+  附着/替换签名。只收 `signature` 对象而不收整个 manifest —— 产物字节没变，收 manifest 就等于
+  允许顺手改权限面与产物摘要，那是「换包」不是「加签」。
+- **入库校验（`httpapi/hursign.go`）**：`kind=hur` 现在要求**自描述**（`manifest.hur` 的
+  `spec` / `id` / `artifact.sha256`），并做两条交叉核对：
+  - 上传字节 sha256 ≠ `manifest.hur.artifact.sha256` → `digest_mismatch`；
+  - `signature.sha256` ≠ 制品摘要 → `signature_mismatch`；
+  - `keynum` 缺失 / 非 minisign / 有 `url` 无 `sigSha256` → `bad_signature`。
+- **刻意不做**：不验密码学（要 Minisign 全套 + 受信公钥列表，属下载方判断）、
+  **不用本节点密钥代签** —— 「谁签的」必须由发布者自己的设备说了算。
+- **副本只读**：分发到本节点的副本不能在本地加签（`replica_readonly`），要走源头节点。
+- 控制台目录行为 `kind=hur` 且带签名的条目加上「已签名（keynum…）」徽章（本地条目才有
+  manifest；worker 上报的远端条目不带，所以不显示，而非表示未签）。
+
 ## [0.1.0] — 2026-09-24
 
 首个独立版本：仓库从 `ncc` 拆出来（`module github.com/fusedmodel/ncc-registry`），

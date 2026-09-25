@@ -400,14 +400,18 @@ func nodeJSON(r *store.NodeRow, ttl time.Duration) gin.H {
 	return gin.H{
 		"id": r.ID, "slug": r.Slug, "name": r.Name, "kind": r.Kind, "region": r.Region,
 		"url": r.URL, "os": r.OS, "arch": r.Arch, "version": r.Version, "agent": r.Agent,
-		"capabilities": store.ParseList(r.Capabilities),
-		"visibility":   r.Visibility,
-		"status":       map[bool]string{true: "online", false: "offline"}[nodeOnline(r.LastSeen, ttl)],
-		"online":       nodeOnline(r.LastSeen, ttl),
-		"lastSeen":     r.LastSeen,
-		"namespace":    gin.H{"slug": r.NsSlug, "name": r.NsName},
-		"owner":        gin.H{"id": r.OwnerID, "name": r.OwnerName},
-		"link":         link,
+		// 归一后再展示：老节点上报的 `mcp` 在界面上也显示成 `serve:mcp`，
+		// 这样「我声明了什么」与「别人按什么搜我」永远对得上。
+		"capabilities": model.NormalizeOffers(store.ParseList(r.Capabilities)),
+		// 自证能力单独一份：`?can=<id>@verified` 就是拿它筛的。
+		"capabilitiesVerified": model.NormalizeOffers(store.ParseList(r.OffersVerified)),
+		"visibility":           r.Visibility,
+		"status":               map[bool]string{true: "online", false: "offline"}[nodeOnline(r.LastSeen, ttl)],
+		"online":               nodeOnline(r.LastSeen, ttl),
+		"lastSeen":             r.LastSeen,
+		"namespace":            gin.H{"slug": r.NsSlug, "name": r.NsName},
+		"owner":                gin.H{"id": r.OwnerID, "name": r.OwnerName},
+		"link":                 link,
 	}
 }
 
