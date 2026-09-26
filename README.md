@@ -1,541 +1,603 @@
-# ncc-registry · 内网托管节点
+# ncc-registry — a self-hosted registry node for your own network
 
-一个**单二进制**的内网 Registry 服务：把「**制品托管**」「**配置托管**」「**分享**」
-「**节点托管**」「**Agent 发现与互联**」「**节点治理**」收在一个进程里，
-并支持**多节点**（一个 `master` + 若干 `worker`）横向铺开。
+> English | [中文](README.zh-CN.md)
 
-它属于 [`ncc`](https://github.com/fusedmodel/ncc) 这个开源/可分发的部分：Go 单二进制、SQLite 单文件、
-内置 Web 控制台，不依赖平台私有代码，也不引入外部数据库或对象存储就能跑。
-变更历史见本仓库的 [`CHANGELOG.md`](CHANGELOG.md)。
+A **single-binary** registry service that puts **artifact hosting**, **configuration hosting**,
+**share links**, **node hosting**, **agent discovery & interconnection**, and **node governance**
+into one process — and scales out as **multiple nodes** (one `master` plus any number of `worker`s).
+
+It is part of the open, self-hostable [`ncc`](https://github.com/fusedmodel/ncc) project:
+one Go binary, one SQLite file, a built-in web console, no external database and no object storage
+required to get started. Change history lives in [`CHANGELOG.md`](CHANGELOG.md).
 
 ```bash
 go build -o dist/ncc-registry ./cmd/ncc-registry
 NCCR_PORT=8282 ./dist/ncc-registry          # → http://localhost:8282
 ```
 
-它同时是一个**可被 import 的 Go 库**（`module github.com/fusedmodel/ncc-registry`）——
-想在自己的进程里起一个内网 Registry，见下方[「作为 Go 库使用」](#作为-go-库使用)。
+It is also an **importable Go library** (`module github.com/fusedmodel/ncc-registry`) — to embed a
+registry node in your own process, see [Using it as a Go library](#using-it-as-a-go-library).
 
-## 两件事（能力总表）
+**Requirements**: Go 1.24+ to build from source (or use the published Docker image / the prebuilt
+binaries from Releases). No external database, no object storage and no other NCC component is needed.
 
-| 能力 | 说明 | 主要接口 |
+**When it is useful**: you have agents, skills, packages and services scattered across machines on a
+private network, and you want one address that answers "what exists here, who provides it, who is
+allowed to fetch it, and what changed" — without standing up a database cluster or handing your
+bytes to a third party.
+
+## What it does
+
+| Capability | Description | Main endpoints |
 |---|---|---|
-| **制品托管** | 账号 / 命名空间 / 发布 / 检索 / 下载 / 分发；`sha256` 校验、`@命名空间/slug` 稳定引用 | `/api/auth/*`、`/api/registry*` |
-| **内网托管节点** | 用户把内网的 Agent / 服务**注册 + 心跳**托管进来，声明「我是谁、在哪、能干什么」 | `/api/nodes/heartbeat`、`/api/nodes` |
-| **Agent 发现与互联** | 在同一信任域内发现彼此、收进连接表、按区域聚合；问「这个能力该找哪个节点要」 | `/api/nodes/discover`、`/api/nodes/links`、`/api/nodes/route` |
-| **接入：key/secret 或内网短链** | 一条内网短链（或 key+secret）就能把一个 Agent 加进来；兑换出的是**最小权限的节点令牌** | `/api/access/*`、`/j/:key` |
-| **授权：连接 ≠ 授权** | 私有制品 / 私有节点 / 非公开配置要显式 `grant`；撤销立即生效（支持按命名空间限定） | `/api/grants*` |
-| **配置托管** | 团队的网络 / 基础设施 / Agent 配置作为一等资源：版本历史、回滚、按环境成组拉取、敏感值静态加密 | `/api/configs*` |
-| **分享链接** | 把一条制品变成**临时下载地址**发出去：对方不用登录、不用装 CLI；可限次 / 限时 / 撤销 | `/api/shares*`、`/s/:token` |
-| **节点管理（admin）** | 节点管理员管**用户 / 节点 / 服务**（禁用启停、重置密码、摘除、归档），每个动作都进审计 | `/api/admin/*` |
-| **多节点（master/worker）** | worker 注册 + 心跳上报本地目录；master 聚合目录、做能力路由、代理字节，还能把制品**分发**到 worker 并在下架时**回收** | `/api/cluster*` |
-| **打洞条件（P2P）** | 在**这台机器**上判断跨网可不可达：NAT 画像 + 与对端映射真实对打（0 字节）；可选开一个**只应答 STUN** 的可被打洞入口 | `/api/p2p/self`、`/api/p2p/check`、`/api/p2p/serve` |
+| **Artifact hosting** | Accounts / namespaces / publish / search / download / replication; `sha256` verification and a stable `@namespace/slug` reference | `/api/auth/*`, `/api/registry*` |
+| **Hosted nodes** | Users **register + heartbeat** the agents and services running on their network, declaring *who I am, where I am, what I can do* | `/api/nodes/heartbeat`, `/api/nodes` |
+| **Agent discovery & interconnection** | Discover each other inside one trust domain, keep a connection list, aggregate by region, and ask "which node should I ask for this capability?" | `/api/nodes/discover`, `/api/nodes/links`, `/api/nodes/route` |
+| **Onboarding: key/secret or a short link** | One short link (or key + secret) adds an agent; what it redeems is a **least-privilege node token** | `/api/access/*`, `/j/:key` |
+| **Authorization: connected ≠ authorized** | Private artifacts, private nodes and non-public config require an explicit `grant`; revocation takes effect immediately (optionally namespace-scoped) | `/api/grants*` |
+| **Configuration hosting** | Team network / infrastructure / agent configuration as a first-class resource: revision history, rollback, per-environment bundle fetch, encryption at rest for sensitive values | `/api/configs*` |
+| **Share links** | Turn an artifact into a **temporary download address**: the recipient needs no account and no CLI; limited uses, limited time, revocable | `/api/shares*`, `/s/:token` |
+| **Node administration (admin)** | A node administrator manages **users / nodes / services** (disable, enable, reset passwords, remove, archive); every action is audited | `/api/admin/*` |
+| **Multi-node (master/worker)** | Workers register and heartbeat their local directory; the master aggregates, routes by capability, proxies bytes, and can **replicate** artifacts to workers and **revoke** them on removal | `/api/cluster*` |
+| **Hole-punching readiness (P2P)** | Decide on **this machine** whether cross-network reachability is possible: NAT profile plus a real (zero-byte) probe against a peer's mapping; optionally expose a **STUN-answer-only** hole-punchable entry point | `/api/p2p/self`, `/api/p2p/check`, `/api/p2p/serve` |
 
-## 架构
+## Architecture
 
 ```mermaid
 flowchart TB
-  subgraph net["一个内网 / 一个信任域"]
-    M["master（权威节点）<br/>账号 · 制品 · 节点目录 · 集群视图<br/>+ 能力路由 / 字节代理"]
-    W1["worker A（边缘托管点）<br/>自己的制品与节点"]
+  subgraph net["one private network / one trust domain"]
+    M["master (authoritative node)<br/>accounts · artifacts · node directory · cluster view<br/>+ capability routing / byte proxy"]
+    W1["worker A (edge hosting point)<br/>its own artifacts and nodes"]
     W2["worker B"]
-    N1["托管节点：alice 的 Agent"]
-    N2["托管节点：某服务"]
+    N1["hosted node: alice's agent"]
+    N2["hosted node: some service"]
   end
-  CLI["ncc CLI / 任意 Agent"] -->|"login / join / status / publish / install"| M
-  W1 -->|"POST /api/cluster/heartbeat（含本地目录）"| M
-  W2 -->|"同上报"| M
+  CLI["ncc CLI / any agent"] -->|"login / join / status / publish / install"| M
+  W1 -->|"POST /api/cluster/heartbeat (with local directory)"| M
+  W2 -->|"same report"| M
   N1 -->|"POST /api/nodes/heartbeat"| M
   N2 -->|"POST /api/nodes/heartbeat"| W1
-  M -. "GET <worker>/api/registry/@ns/slug/bytes（代理字节）" .-> W2
+  M -. "GET <worker>/api/registry/@ns/slug/bytes (byte proxy)" .-> W2
 ```
 
-**权威在 master**：账号、制品、节点目录都以 master 为准；worker 是**边缘托管点**——
-它自己也托管制品与节点，并定期把「我这里有什么」报给 master。客户端（CLI / Agent）
-只要认识 master 一个地址：查目录看聚合结果，下载时 master 会去持有者那里把字节代理回来；
-要让内网某个/全部 worker 也持有副本，master 把条目**分发**过去（见 §集群写）。
+**The master is authoritative**: accounts, artifacts and the node directory all resolve there.
+A worker is an **edge hosting point** — it hosts artifacts and nodes itself and periodically reports
+"what I have" to the master. Clients (CLI or agent) only need to know one address: they read the
+aggregated directory from the master, and on download the master proxies the bytes back from
+whichever node holds them. To make some or all workers hold a copy as well, the master
+**replicates** the entry to them (see [Cluster writes](#cluster-writes-replicate-and-revoke)).
 
-## 快速开始
+## Quick start
 
-### ① 单节点（最小形态）
+### 1. Single node (minimal form)
 
 ```bash
 cd ncc-registry
 go build -o dist/ncc-registry ./cmd/ncc-registry
-NCCR_DATA_DIR=./data ./dist/ncc-registry          # master，默认 :8282
-# 控制台 http://localhost:8282（含「节点管理」区块）
+NCCR_DATA_DIR=./data ./dist/ncc-registry          # master, :8282 by default
+# console at http://localhost:8282 (includes the "node administration" section)
 ```
 
-### ② master + worker（多节点）
+### 2. master + worker (multiple nodes)
 
 ```bash
-# 终端 1：master
+# terminal 1: master
 NCCR_PORT=8282 NCCR_DATA_DIR=./data/master NCCR_NODE_NAME=office-master \
-  NCCR_NODE_REGION=上海-内网 ./dist/ncc-registry
+  NCCR_NODE_REGION=shanghai-intranet ./dist/ncc-registry
 
-# 终端 2：worker（在另一台机器上就用它的内网 IP）
+# terminal 2: worker (on another machine, use that machine's private IP)
 NCCR_ROLE=worker NCCR_PORT=8283 NCCR_DATA_DIR=./data/worker-a \
-  NCCR_NODE_NAME=office-worker-a NCCR_NODE_REGION=上海-内网 \
+  NCCR_NODE_NAME=office-worker-a NCCR_NODE_REGION=shanghai-intranet \
   NCCR_MASTER_URL=http://127.0.0.1:8282 NCCR_HEARTBEAT=15s ./dist/ncc-registry
 ```
 
-worker 启动即 `join`，之后每 `NCCR_HEARTBEAT` 心跳一次，把本地目录一并报上去。
-master 侧 30s 清理一次失联 worker（`4 × NCCR_NODE_TTL`）及其目录。
+A worker `join`s on startup and then heartbeats every `NCCR_HEARTBEAT`, reporting its local directory
+along the way. The master sweeps unreachable workers (and their directory entries) every 30s
+(`4 × NCCR_NODE_TTL`).
 
-> 字节放独立盘 / NAS：加 `NCCR_BLOB_DIR=/mnt/nas/ncc-blobs`（库存哪儿用 `NCCR_DB_PATH`），
-> 见 [目录与存储](#目录与存储)。
+> Keeping bytes on a separate disk / NAS: add `NCCR_BLOB_DIR=/mnt/nas/ncc-blobs` (and point the
+> database wherever you like with `NCCR_DB_PATH`) — see [Directories and storage](#directories-and-storage).
 
-### ③ CLI 接进来（Agent 插件视角）
+### 3. Connecting the CLI
 
 ```bash
-N=./cli/target/release/ncc                    # 或装好的 ncc
+N=./cli/target/release/ncc                    # or an installed ncc
 
-# 登录某个 ncc-registry 节点
+# log in to a registry node
 $N --base http://localhost:8282 registry login --email you@corp.com --password '***'
 
-# 把这台机器作为一个节点托管进去（--daemon 常驻心跳）
-$N registry join --kind agent --name my-mac --region 上海-内网 --capabilities mcp,api
+# host this machine as a node (--daemon keeps a heartbeat running)
+$N registry join --kind agent --name my-mac --region shanghai-intranet --capabilities mcp,api
 
-# 看本节点 / 集群 / 我的节点
+# inspect this node / the cluster / my nodes
 $N registry status
-$N registry nodes --kind agent                # 发现本实例上可连接的节点
-$N registry catalog                           # 聚合目录（本节点 + 各 worker）
-$N registry route @alice/hotel-skill          # 这个能力该找哪个节点要
-$N registry leave --name my-mac               # 下线我的节点
+$N registry nodes --kind agent                # nodes on this instance you can connect to
+$N registry catalog                           # aggregated directory (this node + every worker)
+$N registry route @alice/hotel-skill          # which node should serve this capability?
+$N registry leave --name my-mac               # take my node offline
 
-# 接入票据 / 分发 / 下架回收 / 授权
-$N registry ticket create --label "给 alice 的 Agent" --uses 1 --expires 7
+# access tickets / replication / removal / grants
+$N registry ticket create --label "for alice's agent" --uses 1 --expires 7
 $N registry ticket list && $N registry ticket rm TK-…
 $N registry replicate @alice/hotel-skill --to all
 $N registry rm @alice/hotel-skill --yes
-$N grant set --user @bob --kind artifact      # 连接 ≠ 授权：拿私有东西要显式授权
+$N grant set --user @bob --kind artifact      # connected ≠ authorized: private things need a grant
 $N grant set --user @bob --kind node
 
-# 分享：把一条制品变成临时下载地址（对方不用登录、不用装 CLI）
-$N registry share create @alice/hotel-skill --label "给合作方" --uses 1 --expires 7
-$N registry share list                        # 我发的（--all 需管理员）
+# sharing: turn an artifact into a temporary download link (no account, no CLI for the recipient)
+$N registry share create @alice/hotel-skill --label "for partner" --uses 1 --expires 7
+$N registry share list                        # the ones I issued (--all requires an admin)
 
-# 节点治理（本节点第一个注册的账号就是管理员；机器用 admin key/secret）
+# node administration (the first account registered on this node is the admin; machines use an admin key/secret)
 $N registry admin login --key AK-… --secret …
 $N registry admin overview | users | nodes | services | audit
-$N registry admin disable bob@corp.com --note "违规发布"
-$N registry admin rotate --label ops          # 轮换 admin key/secret（旧的立即失效）
+$N registry admin disable bob@corp.com --note "policy violation"
+$N registry admin rotate --label ops          # rotate admin key/secret (the old one stops working immediately)
 
-# 既有的制品命令照旧可用（同一个 HTTP 契约）
+# the existing artifact commands keep working (same HTTP contract)
 $N publish --file ./hotel.SKILL.md --kind skill --name "Hotel Skill" --slug hotel-skill --replicate all
 $N search skill --tag hotel
-$N install @alice/hotel-skill                 # 即使是 worker 上的，也走 master 代理
+$N install @alice/hotel-skill                 # even if it lives on a worker, the master proxies it
 ```
 
-### ④ 用一条短链把别人加进来
+### 4. Onboarding someone with a short link
 
 ```bash
-# 签发一次（key + secret + 内网短链；secret 只显示这一次）
-$N registry ticket create --label "给 alice 的 Agent" --uses 1 --expires 7
+# issue once (key + secret + short link; the secret is shown only here)
+$N registry ticket create --label "for alice's agent" --uses 1 --expires 7
 #  → key NK-7F3A2C · secret ab1b98… · http://localhost:8282/j/NK-7F3A2C#ab1b98…
 
-# 把链接发给对方，对方一条命令直接接入（含入网）
-$N registry add 'http://localhost:8282/j/NK-7F3A2C#ab1b98…' --join --kind agent --region 上海-内网
-# 或分开填 key/secret：
+# send the link; the recipient onboards with one command (node registration included)
+$N registry add 'http://localhost:8282/j/NK-7F3A2C#ab1b98…' --join --kind agent --region shanghai-intranet
+# or pass key/secret separately:
 $N registry add --base http://localhost:8282 --key NK-7F3A2C --secret ab1b98… --join
 ```
 
-浏览器打开链接会看到接入页（自动读取 fragment 里的 secret，给出可复制的命令 + 一键验证）。
+Opening the link in a browser shows an onboarding page (it reads the secret from the fragment and
+offers a copy-paste command plus a one-click verification).
 
-## 概念与边界
+## Concepts and boundaries
 
-- **托管节点 vs 集群节点**：托管节点是*用户内网里的东西*（Agent / 服务，`/api/nodes/*`）；
-  集群节点是*跑 ncc-registry 的实例本身*（`/api/cluster/*`）。两者都在，但别混。
-- **节点自己声明类型**：`service`（服务）/ `agent`（为人服务的 Agent）/ `assigned`（被分配的 Agent），
-  在上报时给出（`ncc registry join --kind`），不是连接方决定的。
-- **注册与心跳是同一件事**：第一次上报即注册，之后每次上报续租 `LastSeen`；
-  在线与否由 `NCCR_NODE_TTL` 判定，**不落库**（避免心跳写放大）。
-- **连接 ≠ 授权**：`/api/nodes/links`（`ncc nodes link`）只是我这边的「找得到」清单，
-  同一实例即信任域，不需要对方审批；取私有制品仍要另配授权（见 Roadmap）。
-- **目录权威不下放**：master 是目录权威；worker 上报的是「我这里有」的声明，
-  聚合只用于发现与路由，不替代权威记录。
-- **治理与资产是两套权**：`/api/admin/*`（管人、管节点）与普通接口（看/发制品、上报心跳）
-  走**两套门禁**。管理员身份有两种，等价：本节点**第一个注册的账号**（自带 `IsAdmin`），
-  或一把**机器凭据** `AK-…` + secret。别把治理权塞进作用域体系 —— 那是资产权。
-- **分享 ≠ 授权**：分享是**临时放行**（按链接、可限次/限时/撤销，拿到字节即结束），
-  授权是**长期按人**（`ncc grant`）。分享不改变制品本身的可见性。
-- **归档 ≠ 删除**：管理员处理服务条目只改 `status=archived`（从目录消失），
-  字节与版本历史保留 —— 删不删是条目归属者的事。
+- **Hosted node vs cluster node**: a hosted node is *something inside a user's network* (an agent or
+  a service, `/api/nodes/*`); a cluster node is *an instance of ncc-registry itself*
+  (`/api/cluster/*`). Both exist — don't confuse them.
+- **Nodes declare their own type**: `service`, `agent` (an agent serving a person) or `assigned`
+  (an agent assigned to a task), reported by the node itself (`ncc registry join --kind`), never
+  decided by whoever connects to it.
+- **Registration and heartbeat are the same thing**: the first report registers, every later report
+  renews `LastSeen`. Online/offline is decided by `NCCR_NODE_TTL` and **is not persisted**
+  (avoiding write amplification on every heartbeat).
+- **Being connected ≠ being authorized**: `/api/nodes/links` (`ncc nodes link`) is only my own list of
+  "things I can find". One instance is one trust domain, so no approval from the other side is
+  needed; fetching something private still requires a separate grant (see below).
+- **Directory authority is never delegated**: the master is the authority; what workers report is a
+  declaration of "I have this". Aggregation is for discovery and routing only — it never replaces
+  the authoritative record.
+- **Governance and assets are two separate permissions**: `/api/admin/*` (managing people and nodes)
+  and the regular endpoints (reading/publishing artifacts, heartbeating) go through **two different
+  gates**. There are two equivalent admin identities: the **first account registered on this node**
+  (it gets `IsAdmin`), or a **machine credential** `AK-…` plus secret. Don't fold governance into the
+  scope system — that one is for assets.
+- **Sharing ≠ granting**: a share is a **temporary pass** (per link, limited in uses/time, revocable —
+  it ends as soon as the bytes are handed over); a grant is **long-lived and per person** (`ncc grant`).
+  Sharing does not change an artifact's visibility.
+- **Archiving ≠ deleting**: when an admin handles a service entry, it only flips `status=archived`
+  (it disappears from the directory) while bytes and version history are kept — whether to delete is
+  the owner's call.
 
-## 接入：key/secret 与内网短链
+## Onboarding: key/secret and the short link
 
-内网里加一个 Agent，不该要求对方去注册账号、拼 `--base`。签一张**接入票据**即可：
+Adding an agent on a private network should not require the other side to register an account or
+hand-assemble a `--base`. Issue an **access ticket** instead:
 
-| 形态 | 长什么样 | 给谁用 |
+| Form | What it looks like | Who it is for |
 |---|---|---|
-| key + secret | `NK-7F3A2C` + 32 位 secret | 手工填（key 短、可念；secret 只显示一次，库里只存 sha256） |
-| 接入短链 | `http://host:8282/j/NK-7F3A2C#<secret>` | 直接发链接，对方 `ncc registry add '<链接>' --join` 一条命令接入 |
+| key + secret | `NK-7F3A2C` + a 32-character secret | Manual entry (the key is short and can be read aloud; the secret is shown once and only its `sha256` is stored) |
+| Short link | `http://host:8282/j/NK-7F3A2C#<secret>` | Just send the link; the recipient runs `ncc registry add '<link>' --join` |
 
-- **secret 放 URL fragment（`#`）**：浏览器不会把它发给服务端，因此不进访问日志、不进 `Referer`。
-  所以短链自带凭据，而服务端从未拥有完整凭据。
-- 票据可限次（`--uses`）、可过期（`--expires`）、可删除；兑换记在 `used_count` 上。
-- 兑换出的是**节点令牌**（JWT `kind=node`），作用域默认 `nodes:write, registry:read, registry:download`：
-  只能续租**它自己的那个节点**、只能读公开制品，不能发布、不能进别人的命名空间。
-- 兑换时可以顺手入网（请求带 `node` 字段）—— `ncc registry add … --join` 就是这一步。
-- 节点归属**签发者**的命名空间（默认个人空间）：Agent 接进来后直接出现在你的「我的节点」里。
+- **The secret lives in the URL fragment (`#`)**: browsers never send fragments to the server, so it
+  stays out of access logs and `Referer` headers. The short link therefore carries the credential
+  while the server never holds it in full.
+- Tickets can be limited by uses (`--uses`), expire (`--expires`) and be deleted; redemptions are
+  counted in `used_count`.
+- What gets redeemed is a **node token** (a JWT with `kind=node`) scoped to
+  `nodes:write, registry:read, registry:download` by default: it can renew *its own* node only, can
+  read public artifacts, and can neither publish nor enter anyone else's namespace.
+- Redemption can register the node in the same call (a `node` field in the request body) — that is
+  what `ncc registry add … --join` does.
+- The node belongs to the **issuer's** namespace (personal by default), so an onboarded agent shows up
+  directly under "my nodes".
 
-## 授权：连接 ≠ 授权
+## Authorization: being connected is not being authorized
 
-连接（`/api/nodes/links`）只解决「找得到」；要「拿得到」必须有 `Grant`：
+Being connected (`/api/nodes/links`) only answers "can I find it". Actually fetching requires a
+`Grant`:
 
-| 类型 | 放开什么 |
+| Kind | What it opens |
 |---|---|
-| `artifact` | 拉取我命名空间下的私有 / 草稿制品（可按命名空间限定） |
-| `node` | 在 discover 里看到并连接我的私有托管节点 |
-| `config` | 读取我的非公开配置（配置托管，见下一节） |
+| `artifact` | Pulling private / draft artifacts in my namespaces (optionally namespace-scoped) |
+| `node` | Seeing and connecting to my private hosted nodes in discovery |
+| `config` | Reading my non-public configuration (see the configuration section) |
 
 ```bash
-ncc grant set --user @bob --kind artifact            # 全部命名空间的制品
-ncc grant set --user @bob --kind artifact --ns @team # 只放开 @team
-ncc grant set --user @bob --kind node                # 私有节点可见/可连
-ncc grant set --user @bob --kind config              # 非公开配置可读（不可写）
-ncc grant list            # 我给出的（--in 看别人给我的）
-ncc grant rm <id>         # 撤销，立即生效
+ncc grant set --user @bob --kind artifact            # artifacts in all of my namespaces
+ncc grant set --user @bob --kind artifact --ns @team # only @team
+ncc grant set --user @bob --kind node                # private nodes become visible/connectable
+ncc grant set --user @bob --kind config              # non-public config becomes readable (not writable)
+ncc grant list            # what I granted (--in shows what others granted me)
+ncc grant rm <id>         # revoke, effective immediately
 ```
 
-私有条目的字节地址是**短时签名地址**（`HMAC(secret, ref|exp)`，默认 10 分钟）：
-因为 `ncc download` 拉字节时不会再带 `Authorization`，所以拿到元数据的那一刻服务端就给它一条
-能自证的 URL —— 未授权者既拿不到元数据，也伪造不了签名。
+The byte URL of a private entry is a **short-lived signed address** (`HMAC(secret, ref|exp)`,
+10 minutes by default): `ncc download` does not send `Authorization` when it pulls bytes, so the
+server hands out a URL that proves itself at that moment. Someone unauthorized can neither obtain the
+metadata nor forge the signature.
 
-## 分享：把一条制品变成临时下载地址
+## Sharing: turning an artifact into a temporary download link
 
-内网里要把一个产物给同事 / 给外部合作方看，最轻的做法不是「给他一个账号」，而是**一条链接**：
+Handing a build to a colleague or an outside partner is usually better served by **a link** than by
+creating them an account:
 
 ```bash
-ncc registry share create @team/report --label "给合作方" --uses 1 --expires 7
-#  → 说明页  http://host:8282/s/<token>
-#    直链    http://host:8282/s/<token>/raw
+ncc registry share create @team/report --label "for partner" --uses 1 --expires 7
+#  → landing page  http://host:8282/s/<token>
+#    direct link   http://host:8282/s/<token>/raw
 ```
 
-| 入口 | 用途 | 计数 |
+| Entry point | Purpose | Counted? |
 |---|---|---|
-| `GET /s/<token>` | 说明页（这是什么、还能用几次、下载按钮） | 不计数 |
-| `GET /s/<token>/raw` | 直接下发字节（`curl -OJ` / Agent） | **只有它计数** |
-| `GET /s/<token>/raw?meta=1` | 只取元数据（`sha256` / 大小 / 引用） | 不计数 |
+| `GET /s/<token>` | Landing page (what this is, how many uses are left, download button) | no |
+| `GET /s/<token>/raw` | Serves the bytes (`curl -OJ`, agents) | **yes — only this one counts** |
+| `GET /s/<token>/raw?meta=1` | Metadata only (`sha256` / size / reference) | no |
 
-- **token 只存 sha256**（与接入票据的 secret 同规矩），32 位随机串，只在创建时返回一次。
-- 可限次（`--uses`）、可过期（`--expires`）、可撤销（`ncc registry share rm`）：
-  撤销 / 过期 / 用尽即失效（`410 share_expired`）。
-- **创建分享不是提权**：只有本来就能读这条制品的人能分享它（否则 403）。
-- 分享**不改变制品的可见性**：私有制品分享给 A，不代表 A 从此能搜到它 —— 那要 `ncc grant`。
-- 管理员可以看全部分享（`ncc registry share list --all`）并撤销任意一条。
+- **Only the `sha256` of the token is stored** (same rule as access-ticket secrets); it is a 32-character
+  random string returned once at creation time.
+- Limited by uses (`--uses`), expiring (`--expires`) and revocable (`ncc registry share rm`):
+  revoked / expired / exhausted all fail with `410 share_expired`.
+- **Creating a share is not privilege escalation**: only someone who could already read the artifact
+  can share it (otherwise 403).
+- A share **does not change an artifact's visibility**: sharing a private artifact with A does not
+  mean A can now search for it — that takes `ncc grant`.
+- Admins can see every share (`ncc registry share list --all`) and revoke any of them.
 
 ```bash
-ncc registry share list            # 我发的（--all 需管理员）
-ncc registry share info <链接>      # 看一条链接的状态（公开，不消耗次数）
-ncc registry share rm <SH-…|链接>   # 撤销，立即失效
+ncc registry share list            # the ones I issued (--all requires an admin)
+ncc registry share info <link>     # status of one link (public, does not consume a use)
+ncc registry share rm <SH-…|link>  # revoke; the link stops working immediately
 ```
 
-## 节点管理（admin）：用户 / 节点 / 服务
+## Node administration (admin): users / nodes / services
 
-一台内网 registry 需要有人管：**谁在这台节点注册过、有哪些节点挂着、哪些服务在对外**。
-这就是 `/api/admin/*`，进审计，且与普通接口是**两套门禁**。
+A registry node on a network needs someone in charge: **who has registered here, which nodes are
+still reporting, and which services are being offered**. That is `/api/admin/*` — audited, and gated
+separately from the regular endpoints.
 
-### 谁能管（两种身份，等价）
+### Who can administer (two equivalent identities)
 
-| 身份 | 从哪来 | 怎么用 |
+| Identity | Where it comes from | How to use it |
 |---|---|---|
-| **人** | 本节点**第一个注册的账号**（自动 `IsAdmin`） | `ncc registry login --email …` 后直接用 `ncc registry admin …` |
-| **机器** | 管理员首次出现时**自动签发**的 `AK-…` + secret（可轮换） | `ncc registry admin login --key AK-… --secret …`（写入本机配置），或直接带 `X-NCC-Admin-Key`/`X-NCC-Admin-Secret` 头 |
+| **Person** | The **first account registered on this node** (automatically `IsAdmin`) | `ncc registry login --email …`, then `ncc registry admin …` |
+| **Machine** | An `AK-…` + secret **issued automatically** the first time an admin appears (rotatable) | `ncc registry admin login --key AK-… --secret …` (stored in the local config), or send the `X-NCC-Admin-Key` / `X-NCC-Admin-Secret` headers directly |
 
 ```bash
-# 注册本节点第一个账号时会打印一次 admin 凭据
+# registering the first account on this node prints the admin credential once
 ncc --base http://host:8282 register --email you@corp.com --password '***'
-#   → 👑 admin key AK-XXXXXX · admin secret ****（只显示这一次）
+#   → 👑 admin key AK-XXXXXX · admin secret **** (shown only this once)
 
-ncc registry admin login --key AK-XXXXXX --secret ****   # 写进 ~/.ncc/config.json（0600）
-ncc registry admin status                                # 我是不是管理员、本机凭据能不能用
-ncc registry admin rotate --label ops                    # 轮换：新 secret 生效、旧的立即失效
+ncc registry admin login --key AK-XXXXXX --secret ****   # written to ~/.ncc/config.json (0600)
+ncc registry admin status                                # am I an admin, and does this machine's credential work
+ncc registry admin rotate --label ops                    # rotate: the new secret works, the old one dies immediately
 ```
 
-### 管什么
+### What you can administer
 
-| 对象 | 能做什么 | CLI |
+| Object | What you can do | CLI |
 |---|---|---|
-| **用户** | 看全部账号（含被禁用的）；禁用 / 启用（旧令牌立即失效，本人登录会看到原因）；重置密码（服务端生成，只显示一次） | `admin users` · `admin disable\|enable` · `admin passwd` |
-| **节点** | 看全部托管节点（含私有与离线，带归属者邮箱）；摘除任意节点（指向它的连接记录一并清理） | `admin nodes` · `admin rm-node <ND-…>` |
-| **服务** | 一次看全两类：节点侧 `kind=service`（正在跑的）与制品侧 `kind=api`（声明/交付的接口）；**节点摘除 / 制品归档** | `admin services` · `admin rm-service <ND-…\|@ns/slug>` |
-| **审计** | 谁在什么时候把谁怎么了（actor 是用户还是机器凭据、目标、IP、备注） | `admin audit [--action user.disable]` |
+| **Users** | List every account (including disabled ones); disable / enable (existing tokens stop working immediately and the owner sees a reason on login); reset a password (generated server-side, shown once) | `admin users` · `admin disable\|enable` · `admin passwd` |
+| **Nodes** | List every hosted node (including private and offline ones, with the owner's email); remove any node (connection records pointing at it are cleaned up too) | `admin nodes` · `admin rm-node <ND-…>` |
+| **Services** | See both kinds at once: node-side `kind=service` (currently running) and artifact-side `kind=api` (declared/delivered interfaces); **remove a node / archive an artifact** | `admin services` · `admin rm-service <ND-…\|@ns/slug>` |
+| **Audit** | Who did what to whom, and when (actor being a user or a machine credential, target, IP, note) | `admin audit [--action user.disable]` |
 
 ```bash
 ncc registry admin overview
 ncc registry admin users --q bob
-ncc registry admin disable bob@corp.com --note "违规发布"
-ncc registry admin passwd bob@corp.com          # → 新密码只显示这一次
-ncc registry admin services                     # 节点侧 + 制品侧一起看
-ncc registry admin rm-service @team/hotel-api   # 制品侧：归档（字节保留）
+ncc registry admin disable bob@corp.com --note "policy violation"
+ncc registry admin passwd bob@corp.com          # → the new password is shown only once
+ncc registry admin services                     # node-side and artifact-side together
+ncc registry admin rm-service @team/hotel-api   # artifact-side: archive (bytes are kept)
 ncc registry admin audit --limit 20
 ```
 
-两条硬规则（服务端强制）：**不能禁用自己的账号**（自锁保护），
-**不能禁用最后一个可用管理员**（否则这台节点再也没人能管）。
+Two hard rules enforced by the server: **you cannot disable your own account** (lock-out protection),
+and **you cannot disable the last usable admin** (otherwise nobody could ever administer this node again).
 
-> 控制台首页也有「节点管理（管理员）」区块：填上 admin key/secret 即可在网页里做上面这些事
-> （凭据只存在本机浏览器 localStorage，不会发给其它域）。
+> The console home page has a "node administration" section too: enter the admin key/secret and you
+> can do the same from the browser (the credential stays in that browser's `localStorage` and is never
+> sent to another origin).
 
-## 配置托管（团队的网络 / 基础设施配置）
+## Configuration hosting (team network / infrastructure configuration)
 
-一个团队的网络段、网关、模型端点、CI 变量……**不是制品，也不该塞进制品**：它们会被反复修改、
-需要版本与回滚、默认不能公开，而且经常夹着凭据。所以配置在这里是一等资源。
+A team's network segments, gateways, model endpoints, CI variables… are **not artifacts and should not
+be stuffed into artifacts**: they get edited repeatedly, need versions and rollback, are private by
+default, and often carry credentials. So configuration is a first-class resource here.
 
-| | 制品 Artifact | 配置 Config |
+| | Artifact | Config |
 |---|---|---|
-| 形态 | 可分发的文件（字节进 blob） | 会被就地修改的文档（内容进库） |
-| 默认可见性 | `public` | **`private`** |
-| 迭代方式 | 换 `version` 再发一版 | **就地改 + 每次写入留一版历史** |
-| 跨节点 | 可 fan-out 到 worker（副本 / 回收） | **不参与 fan-out**（权威数据，只在被指向的节点上维护） |
-| 敏感值 | 公开即人可见 | `secret=true` → 内容**静态加密**，默认打码 |
+| Shape | A distributable file (bytes go to blob storage) | A document that is edited in place (content goes to the database) |
+| Default visibility | `public` | **`private`** |
+| How it evolves | Bump `version`, publish again | **Edit in place + one revision per write** |
+| Across nodes | Can fan out to workers (replica / revoke) | **Never fans out** (authoritative data, maintained only on the node it is addressed to) |
+| Sensitive values | Public means human-readable | `secret=true` → content is **encrypted at rest** and masked by default |
 
 ```bash
-ncc registry config kinds                       # 类型（network/gateway/infra/agent/ci/security…）+ 格式 + 环境
+ncc registry config kinds                       # kinds (network/gateway/infra/agent/ci/security…) + formats + environments
 ncc registry config set @team/network --file ./network.yaml \
-    --kind network --env prod --summary "内网网段/DNS/VLAN" --tags network,dns --note "初始版本"
-ncc registry config list --mine                 # 我的全部（含私有；内容默认打码）
-ncc registry config get @team/network           # 元数据 + sha256（不发明文）
-ncc registry config get @team/network --reveal --out ./network.yaml   # 明文落盘
-ncc registry config history @team/network       # 谁在什么时候改了什么
-ncc registry config rollback @team/network --to 2                     # 回滚（作为新版本写回）
-ncc registry config bundle --ns @team --env prod --out ./conf         # 整套拉取（Agent 的第一跳）
+    --kind network --env prod --summary "private segments / DNS / VLANs" --tags network,dns --note "initial revision"
+ncc registry config list --mine                 # everything of mine (private included; content masked by default)
+ncc registry config get @team/network           # metadata + sha256 (no plaintext)
+ncc registry config get @team/network --reveal --out ./network.yaml   # write the plaintext to disk
+ncc registry config history @team/network       # who changed what, and when
+ncc registry config rollback @team/network --to 2                     # roll back (written back as a new revision)
+ncc registry config bundle --ns @team --env prod --out ./conf         # fetch a whole set (an agent's first hop)
 ncc registry config rm @team/network --yes
 ```
 
-**权限三条判定**（缺一不可，服务端与 CLI 同一套）：
+**Three permission decisions** (all three matter; identical on the server and in the CLI):
 
-| 动作 | 需要什么 |
+| Action | What it takes |
 |---|---|
-| 读公开配置 | `visibility=public` 且 `status=active` → 谁都能读 |
-| 读非公开配置 | 作用域 `config:read` **且**（命名空间成员 **或** 拿到 `config` 授权） |
-| 写入 / 回滚 / 删除 | 作用域 `config:write` **且** 命名空间成员（外部只有读授权，不给写） |
+| Read public config | `visibility=public` and `status=active` → anyone can read |
+| Read non-public config | Scope `config:read` **and** (namespace membership **or** a `config` grant) |
+| Write / roll back / delete | Scope `config:write` **and** namespace membership (an outside grant is read-only, never write) |
 
-**给 Agent 的长效凭据**：签一张限定作用域的接入票据，兑换出来的节点令牌就只做这些事——
-票据的 `Sub` 是**签发者本人**，所以 Agent 是「代表你在团队空间里管配置」，不是另开一个身份：
+**A long-lived credential for an agent**: issue a scope-limited access ticket; the node token it
+redeems can do exactly those things — the ticket's `Sub` is **the issuer**, so the agent manages
+configuration *on your behalf inside the team space* instead of becoming a separate identity:
 
 ```bash
 ncc registry ticket create --label agent-conf --scopes config:read,config:write,nodes:write
-# 对方：ncc registry add '<短链>' --join
-# 之后 Agent 就可以：ncc registry config set @team/network --file ./new.yaml --note "Agent 改的"
+# the other side: ncc registry add '<short link>' --join
+# then the agent can do: ncc registry config set @team/network --file ./new.yaml --note "changed by agent"
 ```
 
-**敏感值不再靠自觉**：`--secret` 的配置在落库前用 AES-256-GCM 加密（密钥由本节点的
-`jwt-secret` 派生）。因此备份库文件而不带 `jwt-secret` 是安全的；反过来说，**换机器或丢了数据目录
-就解不开这些密文**（这是设计意图）。校验和按**明文**算，Agent 拿到明文后可以自己复核。
+**Sensitive values no longer rely on discipline**: a config written with `--secret` is encrypted with
+AES-256-GCM before it is stored (the key is derived from that node's `jwt-secret`). Backing up the
+database file without `jwt-secret` is therefore safe; conversely, **moving to another machine or losing
+the data directory means those ciphertexts cannot be decrypted** (this is intentional). Checksums are
+computed over the **plaintext**, so an agent can re-verify after it receives the value.
 
-**成组拉取（bundle）**是 Agent 落地基础设施的第一步：`--env prod` 会同时命中 `prod` 与 `any`
-（通用项），每条都带建议文件名（`team-network.prod.yaml`）与 `sha256`。默认**跳过 `secret` 配置**
-—— 一次把凭据全下到磁盘不是好默认，要用就显式 `--secrets --reveal`。
+**Bundle fetch** is an agent's first step towards configuring real infrastructure: `--env prod` matches
+both `prod` and `any` (the shared entries), and every entry carries a suggested filename
+(`team-network.prod.yaml`) and a `sha256`. It **skips `secret` configs by default** — downloading every
+credential to disk at once is not a good default; use `--secrets --reveal` when you mean it.
 
-> **权威位置**：配置是**被指向的那个节点**的库里的数据（与制品的 fan-out 不同）。
-> 多节点共享配置请把 Agent 指向 master；CLI 在 worker 上操作时会给出提示。
+> **Where the authoritative copy lives**: config lives in the database of **the node it is addressed
+> to** (unlike artifact fan-out). To share config across nodes, point your agents at the master; the
+> CLI prints a hint when you operate on a worker.
 
-## 集群写：分发（replicate）与回收（revoke）
+## Cluster writes: replicate and revoke
 
 ```bash
-ncc publish --file ./x.SKILL.md --kind skill --name X --replicate all   # 发布即分发到全部 worker
-ncc registry replicate @alice/x --to office-worker-a                   # 事后补分发
-ncc registry rm @alice/x --yes                                         # 下架 + 回收各处副本
+ncc publish --file ./x.SKILL.md --kind skill --name X --replicate all   # publish and replicate to every worker
+ncc registry replicate @alice/x --to office-worker-a                   # replicate later
+ncc registry rm @alice/x --yes                                         # remove and collect every replica
 ```
 
-- master 把「条目 + 短时签名地址」推给 worker（`POST /api/cluster/ingest`，集群 token 鉴权）；
-- worker 自己去拉字节并**校验 sha256**，落成 `origin=replica` 的副本（本地不可改，改要走源头）；
-- master 侧记一份分发台账（`replica_targets`）—— 下架时据此回收，**不依赖 worker 心跳是否已上报**
-  （心跳有延迟，刚分发完就下架得能收干净）；全部回收成功才清账；
-- 回收只删副本，worker 自己发布的条目不受影响（`revoke` 只动 `origin=replica` 的行）。
+- The master pushes "entry + short-lived signed address" to workers
+  (`POST /api/cluster/ingest`, authenticated with the cluster token).
+- The worker fetches the bytes itself and **verifies the `sha256`**, storing a replica with
+  `origin=replica` (not locally editable — edits go through the source node).
+- The master keeps a replication ledger (`replica_targets`) so removal can collect replicas
+  **without depending on whether a worker heartbeat has arrived yet** (heartbeats lag: remove right
+  after replicate must still clean up). The ledger is cleared only when everything is collected.
+- Revocation deletes replicas only; entries a worker published itself are untouched
+  (`revoke` only touches rows with `origin=replica`).
 
-## 目录与存储
+## Directories and storage
 
-节点只用本地磁盘，**放哪里都能配**（内网部署最常见的诉求：字节放 NAS / 独立盘，库存本地 SSD）：
+A node only uses local disk, and **where each piece goes is configurable** (the most common request for
+private deployments: bytes on NAS or a dedicated disk, the database on local SSD):
 
-| 目录 | env | 默认 | 装什么 |
+| Directory | env | Default | What goes in it |
 |---|---|---|---|
-| 数据根 | `NCCR_DATA_DIR` | `./data` | `node-id`、`jwt-secret`，以及下面两项的默认落脚点 |
-| 制品字节 | `NCCR_BLOB_DIR` | `<data>/blobs` | **上传写这里、下载从这里读**（经 `/blobs/*` 公开） |
-| 库文件 | `NCCR_DB_PATH` | `<data>/ncc-registry.db` | SQLite 库（含 `-wal` / `-shm`） |
+| Data root | `NCCR_DATA_DIR` | `./data` | `node-id`, `jwt-secret`, and the default location of the two below |
+| Artifact bytes | `NCCR_BLOB_DIR` | `<data>/blobs` | **uploads are written here, downloads are read from here** (served publicly via `/blobs/*`) |
+| Database file | `NCCR_DB_PATH` | `<data>/ncc-registry.db` | SQLite database (including `-wal` / `-shm`) |
 
-- **相对路径按数据根解析**，不是按当前工作目录 —— 换个目录启动不会忽地换地方；
-  解析完成后统一转成**绝对路径**，启动日志与 `GET /api/meta` 里报出的就是真正生效的路径：
+- **Relative paths resolve against the data root**, not the current working directory — starting the
+  process from a different directory does not silently move your data. Everything is turned into an
+  **absolute path** after resolution, and the startup log plus `GET /api/meta` report the paths
+  actually in effect:
 
   ```console
   $ NCCR_DATA_DIR=/srv/ncc NCCR_BLOB_DIR=/mnt/nas/ncc-blobs NCCR_DB_PATH=/srv/ssd/ncc.sqlite ./ncc-registry
-    数据根   /srv/ncc
-    制品字节 /mnt/nas/ncc-blobs   （上传写这里，下载从这里读）
-    库文件   /srv/ssd/ncc.sqlite
+    data root      /srv/ncc
+    artifact bytes /mnt/nas/ncc-blobs   (uploads written here, downloads read from here)
+    database file  /srv/ssd/ncc.sqlite
   ```
 
-- 服务启动时会自动建目录（含库文件的父目录）；目录不可写时直接报错退出，不会静默回退。
-- 字节目录里就是普通文件（文件名随机化），**可以直接拿系统工具看、拷、备份**：
+- Directories (including the database's parent) are created on startup; if one is not writable the
+  process exits with an error instead of silently falling back.
+- The blob directory holds ordinary files (with randomized names), so **system tools can list, copy
+  and back it up directly**:
 
   ```bash
-  ls /mnt/nas/ncc-blobs                      # 每个制品一个文件
+  ls /mnt/nas/ncc-blobs                      # one file per artifact
   ```
 
-- **备份**：库 + 字节目录（可能在不同盘上），或整包 `NCCR_DATA_DIR`（默认布局下二者都在里面）。
-  身份与密钥在数据根下，**丢了两样都会换身份**：`node-id` 变了在集群里就是个新节点。
-- **共享/只读目录**：`NCCR_BLOB_DIR` 指向挂载的共享目录时，多个节点可以共看同一批字节，
-  但“写入”仍各自都在自己那份（本服务不做多写者协调）。
+- **Backup**: the database plus the blob directory (they may be on different disks), or the whole
+  `NCCR_DATA_DIR` if you use the default layout. Identity and keys live in the data root — **losing
+  either changes who you are**: a different `node-id` is a new node as far as the cluster is concerned.
+- **Shared / read-only directories**: pointing `NCCR_BLOB_DIR` at a mounted share lets several nodes
+  see the same bytes, but each still writes only to its own store (this service does no multi-writer
+  coordination).
 
-## 配置（`NCCR_*`）
+## Configuration (`NCCR_*`)
 
-| 变量 | 默认 | 说明 |
+| Variable | Default | Description |
 |---|---|---|
-| `NCCR_ROLE` | `master` | `master`（权威节点）\| `worker`（边缘托管点） |
-| `NCCR_PORT` | `8282` | 监听端口（刻意与平台的 8181 错开，两者可同机共存） |
-| `NCCR_DATA_DIR` | `./data` | 数据根（自动创建）：`node-id` + `jwt-secret`，以及下面两项的默认落脚点 |
-| `NCCR_BLOB_DIR` | `<data>/blobs` | **制品字节目录**：上传写这里、下载从这里读（经 `/blobs/*` 公开）；相对路径按数据根解析 |
-| `NCCR_DB_PATH` | `<data>/ncc-registry.db` | SQLite 库文件（可与数据根分开，比如库存本地 SSD、字节放 NAS） |
-| `NCCR_PUBLIC_URL` | `http://localhost:<port>` | 别人怎么访问本节点（下载 URL、控制台、集群上报都用它） |
-| `NCCR_NODE_NAME` | 主机名 | 节点名 |
-| `NCCR_NODE_REGION` | 空 | 节点区域（如 `上海-内网`；发现与区域聚合按它分类） |
-| `NCCR_NODE_ID` | 自动生成并持久化 | 本节点 id（改它等于换一个节点身份） |
-| `NCCR_JWT_SECRET` | 自动生成并持久化 | HS256 密钥（生产建议显式设置） |
-| `NCCR_JWT_TTL` | `168h` | 登录态有效期 |
-| `NCCR_ACCESS_TTL` | `720h` | 接入票据兑换出的节点令牌有效期（票据本身带过期时间时取更短的那个） |
-| `NCCR_MASTER_URL` | 空 | **worker 必填**：master 地址 |
-| `NCCR_CLUSTER_TOKEN` | 空 | 配了则 worker 注册/心跳必须带 `X-NCC-Cluster-Token`；空 = 内网开放接入 |
-| `NCCR_HEARTBEAT` | `15s` | worker 心跳间隔 |
-| `NCCR_NODE_TTL` | `60s` | 托管节点/worker 的在线判定窗口（master 按 `4×` 清理 worker） |
-| `NCCR_INVITE_CODE` | 空 | 空 = 内网开放注册；设了则注册必须带邀请码（逗号分隔多个） |
-| `NCCR_CONSOLE` | `true` | 是否托管内置 Web 控制台 |
-| `NCCR_P2P_SERVE` | `false` | 随服务开启**可被打洞入口**（一个 UDP socket，只应答 STUN Binding；默认关） |
-| `NCCR_P2P_STUN` | 内置多台 | STUN 列表（逗号分隔）—— 用自己的可达 STUN，NAT 画像与打洞都靠它 |
-| `NCCR_P2P_TURN` | 空 | 自托管 TURN 列表。**红线**：TURN 必须客户自托管，NCC 不中转业务字节 |
-| `NCCR_CORS_ORIGINS` | 空 | 跨域白名单（逗号分隔，`*` 全放行） |
+| `NCCR_ROLE` | `master` | `master` (authoritative node) \| `worker` (edge hosting point) |
+| `NCCR_PORT` | `8282` | Listen port (deliberately different from the platform's 8181 so both can share a machine) |
+| `NCCR_DATA_DIR` | `./data` | Data root (created automatically): `node-id` + `jwt-secret`, and the default location of the next two |
+| `NCCR_BLOB_DIR` | `<data>/blobs` | **Artifact byte directory**: uploads written here, downloads read from here (public via `/blobs/*`); relative paths resolve against the data root |
+| `NCCR_DB_PATH` | `<data>/ncc-registry.db` | SQLite file (can live elsewhere, e.g. database on local SSD and bytes on NAS) |
+| `NCCR_PUBLIC_URL` | `http://localhost:<port>` | How others reach this node (used for download URLs, the console and cluster reports) |
+| `NCCR_NODE_NAME` | hostname | Node name |
+| `NCCR_NODE_REGION` | empty | Node region (e.g. `shanghai-intranet`; discovery and region aggregation group by it) |
+| `NCCR_NODE_ID` | generated and persisted | This node's id (changing it is changing the node's identity) |
+| `NCCR_JWT_SECRET` | generated and persisted | HS256 key (set it explicitly in production) |
+| `NCCR_JWT_TTL` | `168h` | Login session lifetime |
+| `NCCR_ACCESS_TTL` | `720h` | Lifetime of a node token redeemed from an access ticket (the shorter of this and the ticket's own expiry) |
+| `NCCR_MASTER_URL` | empty | **Required on workers**: master address |
+| `NCCR_CLUSTER_TOKEN` | empty | If set, worker registration/heartbeat must send `X-NCC-Cluster-Token`; empty = open inside the network |
+| `NCCR_HEARTBEAT` | `15s` | Worker heartbeat interval |
+| `NCCR_NODE_TTL` | `60s` | Online window for hosted nodes / workers (the master sweeps workers at `4×`) |
+| `NCCR_INVITE_CODE` | empty | Empty = open registration inside the network; if set, registration must carry an invite code (comma-separated for several) |
+| `NCCR_CONSOLE` | `true` | Whether to serve the built-in web console |
+| `NCCR_P2P_SERVE` | `false` | Start a **hole-punchable entry point** with the service (one UDP socket that answers STUN Binding only; off by default) |
+| `NCCR_P2P_STUN` | several built in | STUN list (comma-separated) — use one you can reach; NAT profiling and punching rely on it |
+| `NCCR_P2P_TURN` | empty | Self-hosted TURN list. **Hard rule**: TURN must be hosted by the operator; we never relay traffic |
+| `NCCR_CORS_ORIGINS` | empty | CORS allow-list (comma-separated, `*` allows everything) |
 
-> 约定：`NCCR_*` 与平台的 `NCC_*` 互不干扰，两套服务可以并排跑在同一台机器上。
+> Convention: `NCCR_*` and the platform's `NCC_*` never interfere, so both services can run side by side
+> on the same machine.
 
-## API 速查
+## API reference
 
-公开（读）：
+Public (read):
 
-| 方法/路径 | 说明 |
+| Method / path | Description |
 |---|---|
-| `GET /api/health` · `GET /api/meta` | 存活与本节点自述（角色 / 节点 id / 规模 / 控制台地址） || `GET /api/meta` 的 `kind` 与 `capabilities` | **节点声明自己的能力**（`node`；`registry` / `config` / `share` / `nodes` / `grants` / `access` / `cluster` / `admin` / `p2p`）。CLI / MCP 按这份清单放行命令 —— 声明了 `services` / `profile` 那天，同名命令在本节点上就直接可用 || `GET /api/registry/kinds` | 制品类型与数量 |
-| `GET /api/registry?q=&kind=&tag=&namespace=&page=&size=` | 目录检索（本节点权威） |
-| `GET /api/registry/<@ns/slug\|A-…>` | 制品详情 |
-| `GET /api/registry/<ref>/download` | 下载元数据（`url` / `sha256` / `size` / `via`） |
-| `GET /api/registry/<ref>/bytes` | 真正的字节流（本节点有就发；没有就从 worker 代理） |
-| `GET /api/nodes/discover?kind=&region=&q=` | 本实例上可连接的公开节点 |
-| `GET /api/nodes/regions` | 区域覆盖（各区域在线 / 总数） |
-| `GET /api/nodes/route?ref=` | 能力路由：谁持有这个制品 + 统一入口地址 |
-| `GET /api/access/tickets/:key` | 票据概要（公开，不含 secret） |
-| `GET /s/:token` | 分享落地页（公开，不计数） |
-| `GET /s/:token/raw[?meta=1]` | 分享直链：下发字节（**计数**）/ 只看元数据（不计数） |
-| `GET /api/shares/info/:token` | 一条分享的状态（公开，不计数） |
-| `GET /api/configs/kinds` | 配置类型 / 格式 / 环境目录（含各类数量与上限） |
-| `GET /api/configs?namespace=&kind=&env=&tag=&q=&page=&size=` | 配置目录（匿名只看公开；带凭据加自己的与被授权的） |
-| `GET /api/configs/<@ns/slug\|C-…>?reveal=1&revision=N` | 取一份配置（**默认打码**；`reveal=1` 才出明文） |
-| `GET /api/configs/<ref>/revisions` | 版本历史（含作者 / 变更说明 / 校验和） |
-| `GET /j/:key` | 接入短链落地页（secret 在 fragment，服务端看不到） |
-| `GET /api/cluster` · `GET /api/cluster/workers` | 集群总览（master + 各 worker） |
-| `GET /api/cluster/directory?q=&kind=&tag=` | 聚合目录（本地 + 远端，条目带 `via`；本地条目带 `replicas`） |
+| `GET /api/health` · `GET /api/meta` | Liveness, plus this node's self-description (role / node id / size / console address) |
+| `GET /api/meta` → `kind` + `capabilities` | **The node declaring its own abilities** (`node`; `registry` / `config` / `share` / `nodes` / `grants` / `access` / `cluster` / `admin` / `p2p`). The CLI and MCP allow commands based on this list — the day it declares `services` / `profile`, the same-named commands just work on this node |
+| `GET /api/registry/kinds` | Artifact kinds and counts |
+| `GET /api/registry?q=&kind=&tag=&namespace=&page=&size=` | Directory search (this node is authoritative) |
+| `GET /api/registry/<@ns/slug\|A-…>` | Artifact detail |
+| `GET /api/registry/<ref>/download` | Download metadata (`url` / `sha256` / `size` / `via`) |
+| `GET /api/registry/<ref>/bytes` | The actual byte stream (served locally if held, otherwise proxied from a worker) |
+| `GET /api/nodes/discover?kind=&region=&q=` | Public nodes on this instance you can connect to |
+| `GET /api/nodes/regions` | Region coverage (online / total per region) |
+| `GET /api/nodes/route?ref=` | Capability routing: who holds this artifact, plus a unified entry address |
+| `GET /api/access/tickets/:key` | Ticket summary (public, no secret) |
+| `GET /s/:token` | Share landing page (public, not counted) |
+| `GET /s/:token/raw[?meta=1]` | Share direct link: serve bytes (**counted**) / metadata only (not counted) |
+| `GET /api/shares/info/:token` | Status of one share (public, not counted) |
+| `GET /api/configs/kinds` | Config kinds / formats / environments (with counts and limits per kind) |
+| `GET /api/configs?namespace=&kind=&env=&tag=&q=&page=&size=` | Config directory (anonymous sees public only; with credentials, your own plus granted ones) |
+| `GET /api/configs/<@ns/slug\|C-…>?reveal=1&revision=N` | Fetch one config (**masked by default**; `reveal=1` returns plaintext) |
+| `GET /api/configs/<ref>/revisions` | Revision history (author / change note / checksum) |
+| `GET /j/:key` | Onboarding short-link landing page (the secret is in the fragment, invisible to the server) |
+| `GET /api/cluster` · `GET /api/cluster/workers` | Cluster overview (master + every worker) |
+| `GET /api/cluster/directory?q=&kind=&tag=` | Aggregated directory (local + remote, entries carry `via`; local entries carry `replicas`) |
 
-需登录（`Authorization: Bearer <JWT 或 ncc_ API-Key>`）：
+Requires login (`Authorization: Bearer <JWT or ncc_ API key>`):
 
-| 方法/路径 | 说明 |
+| Method / path | Description |
 |---|---|
-| `POST /api/auth/register` · `POST /api/auth/login` | 注册（自动开个人命名空间）/ 登录 |
-| `GET /api/auth/me` · `PATCH /api/auth/me` | 当前身份 / 改名改密 |
-| `GET\|POST\|DELETE /api/auth/keys[/:id]` · `GET /api/auth/key-scopes` | API-Key 与作用域 |
-| `GET /api/namespaces/mine` · `POST /api/namespaces` | 我的命名空间 / 建组织命名空间 |
-| `POST /api/registry/uploads` | 上传字节（raw body + `X-Filename`；响应含 `sha256`） |
-| `POST /api/registry` · `PATCH/DELETE /api/registry/<ref>` | 创建 / 修改 / 删除条目 |
-| `PUT /api/registry/<ref>/signature` | **加签**：给已发布的 `kind=hur` 制品附着/替换签名（只收 `signature` 对象；签在客户端做，本节点只做摘要核对并无损落盘） |
-| `GET /api/nodes` | 我的托管节点 + 我连接的节点 |
-| `POST /api/nodes/heartbeat`（别名 `POST /api/namespaces/living`） | 托管节点注册 + 心跳 |
-| `DELETE /api/nodes/:id` | 下线我的节点 |
-| `POST /api/nodes/links` · `PATCH\|DELETE /api/nodes/links/:id` | 连接 / 改 Name 标签 / 断开 |
-| `GET /api/grants?direction=outgoing\|incoming` · `POST /api/grants` · `DELETE /api/grants/:id` | 分发授权（`artifact` \| `node` \| `config`）：连接 ≠ 授权 |
-| `POST /api/access/redeem` | 用 key + secret 兑换节点令牌（可选同时入网：body 带 `node`） |
-| `GET\|POST /api/access/tickets` · `DELETE /api/access/tickets/:id` | 签发 / 列出 / 删除接入票据 |
-| `POST /api/cluster/replicate` | 把制品分发到 worker（`targets: "all"` 或名称/id 列表） |
-| `POST /api/cluster/join` · `POST /api/cluster/heartbeat` | worker 注册 / 心跳（master 侧） |
-| `POST /api/cluster/ingest` · `POST /api/cluster/revoke` | 节点间：落副本 / 回收副本（集群 token 鉴权） |
-| `POST /api/configs` · `PATCH/DELETE /api/configs/<ref>` | 创建 / 改内容（加版本）/ 删除配置（需 `config:write` + 成员身份） |
-| `POST /api/configs/<ref>/rollback` | 回滚到某一版（作为新版本写回，历史不改写） |
-| `GET /api/configs/bundle?namespace=&env=&kind=&tag=&secrets=1&reveal=1` | 成组拉取（`env` 命中 `prod` 与 `any`；默认跳过 `secret`） |
-| `POST /api/shares` · `GET /api/shares[?mine=1\|all=1]` · `DELETE /api/shares/:id` | 建 / 列 / 撤销分享链接（`all=1` 需管理员；只能撤自己的，管理员可撤任意） |
+| `POST /api/auth/register` · `POST /api/auth/login` | Register (a personal namespace is created automatically) / log in |
+| `GET /api/auth/me` · `PATCH /api/auth/me` | Current identity / rename or change password |
+| `GET\|POST\|DELETE /api/auth/keys[/:id]` · `GET /api/auth/key-scopes` | API keys and scopes |
+| `GET /api/namespaces/mine` · `POST /api/namespaces` | My namespaces / create an organization namespace |
+| `POST /api/registry/uploads` | Upload bytes (raw body + `X-Filename`; the response includes `sha256`) |
+| `POST /api/registry` · `PATCH/DELETE /api/registry/<ref>` | Create / modify / delete an entry |
+| `PUT /api/registry/<ref>/signature` | **Attach a signature**: attach or replace the signature of an already published `kind=hur` artifact (accepts only the `signature` object; signing happens on the client, this node only cross-checks digests and stores it losslessly) |
+| `GET /api/nodes` | My hosted nodes plus the nodes I am connected to |
+| `POST /api/nodes/heartbeat` (alias `POST /api/namespaces/living`) | Hosted node registration + heartbeat |
+| `DELETE /api/nodes/:id` | Take my node offline |
+| `POST /api/nodes/links` · `PATCH\|DELETE /api/nodes/links/:id` | Connect / change the name label / disconnect |
+| `GET /api/grants?direction=outgoing\|incoming` · `POST /api/grants` · `DELETE /api/grants/:id` | Grants (`artifact` \| `node` \| `config`): connected ≠ authorized |
+| `POST /api/access/redeem` | Redeem a node token with key + secret (optionally registering the node in the same call via a `node` body field) |
+| `GET\|POST /api/access/tickets` · `DELETE /api/access/tickets/:id` | Issue / list / delete access tickets |
+| `POST /api/cluster/replicate` | Replicate an artifact to workers (`targets: "all"` or a list of names/ids) |
+| `POST /api/cluster/join` · `POST /api/cluster/heartbeat` | Worker registration / heartbeat (master side) |
+| `POST /api/cluster/ingest` · `POST /api/cluster/revoke` | Node-to-node: store a replica / collect a replica (cluster-token authenticated) |
+| `POST /api/configs` · `PATCH/DELETE /api/configs/<ref>` | Create / update content (a new revision) / delete a config (needs `config:write` and membership) |
+| `POST /api/configs/<ref>/rollback` | Roll back to a revision (written back as a new revision; history is never rewritten) |
+| `GET /api/configs/bundle?namespace=&env=&kind=&tag=&secrets=1&reveal=1` | Group fetch (`env` matches `prod` and `any`; `secret` configs are skipped by default) |
+| `POST /api/shares` · `GET /api/shares[?mine=1\|all=1]` · `DELETE /api/shares/:id` | Create / list / revoke share links (`all=1` requires an admin; you can only revoke your own, an admin can revoke any) |
 
-打洞条件（P2P；判断面，**不搬运业务字节**，需登录）：
+Hole-punching readiness (P2P; a decision surface that **never carries business bytes**; requires login):
 
-| 方法/路径 | 说明 |
+| Method / path | Description |
 |---|---|
-| `GET /api/p2p/self` | 本节点 NAT 画像 + 结论 + ICE 配置 + 入口状态（在哪台机器上跑就看哪台） |
-| `POST /api/p2p/check` `{peer, waitSec}` | 与一个已知映射地址真实对打（0 字节）；本地拿不到映射时返回 `503 p2p_probe_failed` |
-| `GET /api/p2p/serve` | 可被打洞入口状态（`mapped` / `requestsTaken` / `responsesSeen` / `peers`） |
-| `POST /api/p2p/serve` `{on, peer?}` | 开/关入口；`peer`（`ip:port`，可逗号分隔）是**反向打洞**对端，纯 `{on:true}` 不覆盖已配的 `peer` |
+| `GET /api/p2p/self` | This node's NAT profile, conclusion, ICE configuration and entry-point state (whichever machine runs it is the machine being profiled) |
+| `POST /api/p2p/check` `{peer, waitSec}` | A real (zero-byte) probe against a known mapped address; returns `503 p2p_probe_failed` when a local mapping cannot be obtained |
+| `GET /api/p2p/serve` | Entry-point state (`mapped` / `requestsTaken` / `responsesSeen` / `peers`) |
+| `POST /api/p2p/serve` `{on, peer?}` | Turn the entry point on/off; `peer` (`ip:port`, comma-separated for several) is the **reverse-punch** target — a bare `{on:true}` does not overwrite a configured `peer` |
 
-需**节点管理员**（会话管理员账号，或 `X-NCC-Admin-Key` + `X-NCC-Admin-Secret`）：
+Requires a **node administrator** (an admin session account, or `X-NCC-Admin-Key` + `X-NCC-Admin-Secret`):
 
-| 方法/路径 | 说明 |
+| Method / path | Description |
 |---|---|
-| `GET /api/admin/overview` | 用户 / 管理员 / 节点（按类型）/ 服务 / 制品 / 配置 / 分享 / 审计 计数 |
-| `GET /api/admin/users?q=&limit=&offset=` | 全部账号（含被禁用），带各自节点与制品数 |
-| `PATCH /api/admin/users/:id` | 禁用 / 启用（`disabled` + `adminNote`） |
-| `POST /api/admin/users/:id/password` | 重置密码（不给 `password` 则由服务端生成并只返回一次） |
-| `GET /api/admin/nodes?kind=&region=&q=` | 全部托管节点（含私有与离线，带 `ownerEmail`） |
-| `DELETE /api/admin/nodes/:id` | 摘除节点（并清理指向它的连接记录） |
-| `GET /api/admin/services?source=all\|node\|artifact&q=` | 服务一览：`nodeServices`（kind=service）+ `apiArtifacts`（kind=api） |
-| `DELETE /api/admin/services/:ref` | 服务处理：`ND-…` → 摘除节点；`@ns/slug` → 归档制品 |
-| `GET /api/admin/audit?action=&limit=&offset=` | 审计日志 |
-| `GET /api/admin/keys` · `POST /api/admin/keys/rotate?label=` | 机器凭据列表 / 轮换（新 secret 只返回一次，旧的立即失效） |
+| `GET /api/admin/overview` | Counts for users / admins / nodes (by kind) / services / artifacts / configs / shares / audit |
+| `GET /api/admin/users?q=&limit=&offset=` | Every account (disabled ones included) with its node and artifact counts |
+| `PATCH /api/admin/users/:id` | Disable / enable (`disabled` + `adminNote`) |
+| `POST /api/admin/users/:id/password` | Reset a password (without a `password` field the server generates one and returns it once) |
+| `GET /api/admin/nodes?kind=&region=&q=` | Every hosted node (private and offline included, with `ownerEmail`) |
+| `DELETE /api/admin/nodes/:id` | Remove a node (connection records pointing at it are cleaned up) |
+| `GET /api/admin/services?source=all\|node\|artifact&q=` | Service overview: `nodeServices` (`kind=service`) + `apiArtifacts` (`kind=api`) |
+| `DELETE /api/admin/services/:ref` | Handle a service: `ND-…` → remove the node; `@ns/slug` → archive the artifact |
+| `GET /api/admin/audit?action=&limit=&offset=` | Audit log |
+| `GET /api/admin/keys` · `POST /api/admin/keys/rotate?label=` | List machine credentials / rotate (the new secret is returned once, the old one dies immediately) |
 
-作用域：`registry:read|download|publish`、`nodes:read|write`、`keys:write`（写蕴含读）。
+Scopes: `registry:read|download|publish`, `nodes:read|write`, `keys:write` (write implies read).
 
-错误体统一 `{"error":{"code":"…","message":"…"}}`，HTTP 状态码同步语义
-（400 参数 / 401 未认证 / 403 无权限 / 404 不存在 / 409 冲突 / 413 过大 / 502 节点不可达）。
+Errors always use `{"error":{"code":"…","message":"…"}}`, with HTTP status codes matching the
+semantics (400 bad input / 401 unauthenticated / 403 not permitted / 404 missing / 409 conflict /
+413 too large / 502 node unreachable).
 
-## Web 控制台
+## Web console
 
-`GET /` 是内置的单文件控制台（`httpapi/web/index.html`，随二进制 embed，无构建步骤）：
-本节点身份与规模、集群 worker 列表（在线状态 / 制品数 / 最近心跳）、聚合目录（可搜索）、
-托管节点发现（含区域覆盖）、**节点管理（管理员）**（填 admin key/secret 后可在网页里禁用账号、
-重置密码、摘除节点、归档服务条目、撤销分享、轮换凭据），以及 CLI / HTTP 的接入速查。
+`GET /` is the built-in single-file console (`httpapi/web/index.html`, embedded in the binary, no build
+step): this node's identity and size, the worker list (online state / artifact counts / last heartbeat),
+the aggregated directory (searchable), hosted-node discovery (including region coverage),
+**node administration** (enter the admin key/secret to disable accounts, reset passwords, remove nodes,
+archive service entries, revoke shares and rotate credentials from the browser), and a quick reference
+for the CLI and HTTP entry points.
 
-## 部署
+## Deployment
 
-### Docker Compose（master + worker 示例）
+### Docker Compose (master + worker example)
 
 ```bash
 cd deploy
-docker compose up -d --build            # master :8282，worker :8283
+docker compose up -d --build            # master :8282, worker :8283
 ```
 
-`deploy/docker-compose.yml` 里两个服务共用同一镜像、不同 `NCCR_ROLE`；
-数据分别落在具名卷里。生产上把 worker 部署到各内网机器，`NCCR_MASTER_URL` 指向 master 即可。
+In `deploy/docker-compose.yml` both services share one image and differ only by `NCCR_ROLE`; data goes
+into separate named volumes. In production, deploy workers to the machines on your network and point
+`NCCR_MASTER_URL` at the master.
 
-### 裸二进制 / systemd
+### Bare binary / systemd
 
 ```bash
 NCCR_DATA_DIR=/var/lib/ncc-registry \
 NCCR_NODE_NAME=office-master \
-NCCR_NODE_REGION=上海-内网 \
-NCCR_CLUSTER_TOKEN=<随机串> \
+NCCR_NODE_REGION=shanghai-intranet \
+NCCR_CLUSTER_TOKEN=<random-string> \
   /usr/local/bin/ncc-registry
 ```
 
-单进程 + 单文件目录：备份 = 打包 `NCCR_DATA_DIR`（库 + `blobs/` + `node-id` + `jwt-secret`）。
+One process and one directory: backing up means archiving `NCCR_DATA_DIR`
+(database + `blobs/` + `node-id` + `jwt-secret`).
 
-## 作为 Go 库使用
+## Using it as a Go library
 
 ```bash
 go get github.com/fusedmodel/ncc-registry
 ```
 
-公开包（`p2p` / `secretbox` 是内部实现，不对外）：
+Exported packages (`p2p` and `secretbox` are internal implementations, not public API):
 
-| 包 | 作用 |
+| Package | Purpose |
 |---|---|
-| `config` | `Load()` 读 `NCCR_*` 环境变量（目录 / 身份 / 密钥都会落盘），也可自己填 `Config` 结构体 |
-| `model` | 全部资源模型（用户 / 制品 / 节点 / 配置 / 分享 / 授权…） |
-| `store` | `Open(path)` 打开 SQLite 并自动迁移；所有读写方法都挂在 `*Store` 上 |
-| `storage` | `Storage` 接口 + `NewLocal` 本地磁盘驱动（换成 S3/Ceph 实现同一接口即可） |
-| `httpapi` | `NewServer` / `NewRouter` —— 把上述几样组装成 HTTP 服务 |
+| `config` | `Load()` reads the `NCCR_*` environment variables (directories / identity / keys are persisted to disk); you can also fill in the `Config` struct yourself |
+| `model` | Every resource model (users / artifacts / nodes / configs / shares / grants …) |
+| `store` | `Open(path)` opens SQLite and migrates automatically; all read/write methods hang off `*Store` |
+| `storage` | The `Storage` interface plus a `NewLocal` disk driver (implement the same interface for S3/Ceph) |
+| `httpapi` | `NewServer` / `NewRouter` — assembles the above into an HTTP service |
 
-最小嵌入（自己控配置、自己管生命周期）：
+Minimal embedding (you own the configuration and the lifecycle):
 
 ```go
 package main
@@ -551,13 +613,14 @@ import (
 )
 
 func main() {
-	// ① 想沿用环境变量就用 config.Load()，想自己造就直接填结构体。
+	// 1. Use config.Load() to keep the environment-variable behaviour,
+	//    or build the struct yourself.
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	st, err := store.Open(cfg.DBPath) // 内含 AutoMigrate，建表不用另做
+	st, err := store.Open(cfg.DBPath) // includes AutoMigrate; no separate table setup
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -566,63 +629,78 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// ② NewServer 返回句柄 + 路由。句柄是用来在退出时收后台资源的
-	//    （集群心跳 / 过期 worker 清理 / 可被打洞入口），别丢。
+	// 2. NewServer returns a handle plus the routes. The handle is how you shut down
+	//    background work (cluster heartbeat / expired-worker sweep / hole-punchable
+	//    entry point) on exit — don't drop it.
 	srv, handler := httpapi.NewServer(cfg, st, blob)
-	defer srv.Close() // 可重复调用；不关数据库 —— 谁 open 谁 close
+	defer srv.Close() // safe to call repeatedly; it does not close the database — whoever opened it closes it
 
 	log.Fatal(http.ListenAndServe(cfg.Addr, handler))
 }
 ```
 
-想挂在自己的路由树里、或者只用一部分能力（比如只要 `store` 读写、
-不要它自带的 HTTP 面），就按需取用上表里的包 —— 它们之间没有隐藏的全局状态。
+To mount it inside your own router tree, or to use only part of it (say just `store` for reads and
+writes without the built-in HTTP surface), take the packages you need from the table above — there is
+no hidden global state between them.
 
-> 注意：`NewRouter` 是 `NewServer` 的薄包装，只返回路由、不返回句柄。
-> 进程退出时无所谓；但**反复创建**（测试、多实例）请用 `NewServer` + `Close`，
-> 否则后台循环会一直漏。
+> Note: `NewRouter` is a thin wrapper over `NewServer` that returns the routes but no handle. That is
+> fine when the process is exiting; but if you **create it repeatedly** (tests, multiple instances),
+> use `NewServer` + `Close`, or the background loops will leak.
 
-## 冒烟测试
+## Smoke test
 
 ```bash
-bash scripts/smoke.sh      # 自带启停：master + worker 两节点，端口 18282/18283
+bash scripts/smoke.sh      # starts and stops everything itself: master + worker, ports 18282/18283
 ```
 
-覆盖：集群注册与心跳、制品注册/上传/发布/检索/下载、托管节点心跳与区域覆盖、
-聚合目录（`via=worker`）、能力路由、**master 代理 worker 字节且 `sha256` 一致**、
-**接入票据（短链形态 / 令牌最小权限 / 错 secret 与次数用尽被拒）**、
-**授权（私有制品与私有节点：未授权不可见 → 授权后可见可取 → 撤销后立即失效）**、
-**集群写（发布即分发 → worker 副本 sha256 一致且不可本地改 → 下架回收副本）**、
-**存储目录可配置（字节/库/数据根各指一处，且默认布局不变）**。
+It covers: cluster registration and heartbeat, artifact register/upload/publish/search/download, hosted
+node heartbeats and region coverage, the aggregated directory (`via=worker`), capability routing,
+**the master proxying bytes from a worker with a matching `sha256`**, **access tickets (short-link form /
+least-privilege token / wrong secret and exhausted uses are rejected)**, **grants (private artifacts and
+private nodes: invisible before, visible and fetchable after, immediately gone once revoked)**,
+**cluster writes (replicate on publish → the worker's replica has a matching `sha256` and cannot be edited
+locally → removal collects the replica)**, and **configurable storage directories (bytes / database /
+data root each pointed somewhere else, with the default layout unchanged)**.
 
-当前 **167 项检查**，在 Linux / CI 上全绿。在 **Windows + Git Bash** 下会有 3 项失败：
-那是脚本拿 `NCCR_DATA_DIR` 等的 Git-Bash 路径（`/tmp/xxx`）去比对接口回显的
-Windows 绝对路径（`C:\Users\…`），属脚本的路径显示差异，不是被测行为 ——
-所以 CI 跑在 ubuntu 上，本地 Windows 看到这 3 项红可以忽略。
+The script prints its pass/fail total at the end (the current suite is 167 checks) and is green on Linux
+and in CI. On **Windows + Git Bash** three of them fail: the script compares a Git-Bash path
+(`/tmp/xxx`) from `NCCR_DATA_DIR` against the Windows absolute path (`C:\Users\…`) echoed by the API.
+That is a path-display difference in the script, not in the behaviour under test — which is why CI runs
+on ubuntu, and why those three red lines can be ignored locally on Windows.
 
-## 与其它组件的关系
+## Relationship to other components
 
-下面几个组件都在**别的仓库**里 —— 本仓库不依赖它们中的任何一个，只是共用同一套 HTTP 契约。
+The components below live in **other repositories**. This repository depends on none of them; they
+simply share the same HTTP contract.
 
-| 组件 | 在哪 | 关系 |
+| Component | Where | Relationship |
 |---|---|---|
-| `ncc` CLI（`cli/`） | [`fusedmodel/ncc`](https://github.com/fusedmodel/ncc) | 官方客户端。`ncc registry …` 是面向本服务的命令组；`publish/search/install/nodes/living` 等既有命令复用同一 HTTP 契约 |
-| `@fusedmodel/ncc-cli` | 同上（`packages/ncc-cli`） | npm 包装，装的是同一个 `ncc` 二进制 |
-| 平台侧 | [`fusedmodel/ncc-platform`](https://github.com/fusedmodel/ncc-platform)（私有） | 云端 Registry 与产品页。**本服务不依赖它**：契约同构、代码独立 |
-| `agent/` | 同 `ncc` 仓库 | 把 NCC 能力以 MCP 暴露给任意 Agent 的 harness manifest（与本服务配合使用） |
+| `ncc` CLI (`cli/`) | [`fusedmodel/ncc`](https://github.com/fusedmodel/ncc) | The official client. `ncc registry …` is the command group aimed at this service; existing commands such as `publish` / `search` / `install` / `nodes` / `living` use the same HTTP contract |
+| `@fusedmodel/ncc-cli` | same repo (`packages/ncc-cli`) | The npm wrapper; it installs the same `ncc` binary |
+| Hosted platform | a separate, independently operated deployment | A hosted registry and website with the same contract. **This server does not depend on it**: identical contract, independent code |
+| `agent/` | the `ncc` repository | A harness manifest that exposes NCC capabilities to any agent over MCP (used together with this service) |
 
-## Roadmap（尚未实现，按需推进）
+## Roadmap (not implemented yet; driven by demand)
 
-- **制品签名与版本锁定**：目前是 `sha256` 校验 + 版本号，未做发布者签名。
-- **字节面增强**：本地磁盘 → S3 兼容对象存储（Ceph RGW / MinIO）；worker 侧缓存策略与失效。
-- **跨网互联**：目前是同内网直连 HTTP；跨网需要打洞/中继。选型与实测已收敛：
-  `pion/webrtc` + 控制面信令 + 客户自托管 TURN，见 `ncc` 仓库的 `prd/ncc-p2p-data.md`
-  （实验装置在同一个仓库的 `spike/p2p-transport/`，本机实测直连建连 ~90ms / ~50 MB/s、relay-only 建连 ~2s）。
-  **本节点已具备 P2P 判断面**：`/api/p2p/self|check|serve`（CLI：`ncc registry p2p self|check|serve`，
-  `NCCR_P2P_SERVE=1` 随服务开入口）—— 在这台机器上出 NAT 画像、与对端映射真实对打、并可选开一个
-  只应答 STUN 的可被打洞入口。**注意**：入口的 `peer`（对端映射）必须由信令下发才可长期可用
-  （每个 socket 的映射都不同）；手写 `ncc registry p2p serve --peer ip:port` 只用于演示排障。
-  实测结论：本机 NAT 过滤为 `address_and_port_dependent` 时**纯被动应答收不到任何包**，必须双方同时发。
-  字节面（真正的传输）尚未接上，见 PRD 的 P2.2。
-- **票据的可观测性**：票据使用记录（谁、何时、哪台机器兑换）目前只记最后使用时间与次数，
-  没有逐次审计；节点令牌无法单独吊销（改票据作用域或换密钥需重签）。
+- **Artifact signatures and version pinning**: today it is `sha256` verification plus version numbers,
+  with no publisher signature of its own beyond what clients verify.
+- **Byte-layer improvements**: local disk → S3-compatible object storage (Ceph RGW / MinIO); worker-side
+  cache policy and invalidation.
+- **Cross-network interconnection**: today this is plain HTTP inside one network; crossing networks needs
+  punching or relaying. The design is settled — `pion/webrtc` with a signalling control plane and
+  operator-hosted TURN — and is measured (direct connection ~90 ms / ~50 MB/s, relay-only ~2 s; design
+  notes live in the `ncc` repository). **This node already ships the P2P decision surface**:
+  `/api/p2p/self|check|serve` (CLI: `ncc registry p2p self|check|serve`; `NCCR_P2P_SERVE=1` starts an
+  entry point with the service) — producing a NAT profile on this machine, probing a peer's mapping for
+  real, and optionally answering STUN only. **Note**: the entry point's `peer` (the other side's mapping)
+  must come from signalling to stay useful over time (every socket gets a different mapping); passing
+  `ncc registry p2p serve --peer ip:port` by hand is for demos and troubleshooting. Measured conclusion:
+  with an `address_and_port_dependent` NAT, a purely passive responder receives nothing — both sides have
+  to send. The byte layer (the actual transfer) is not connected yet.
+- **Ticket observability**: ticket usage (who redeemed it, when, from which machine) currently keeps only
+  the last-used time and a counter, with no per-redemption audit; a node token cannot be revoked
+  individually (changing the ticket scopes or the key means reissuing).
+
+## License
+
+Apache License 2.0 — see [LICENSE](LICENSE).

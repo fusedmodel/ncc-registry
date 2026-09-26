@@ -13,7 +13,7 @@
 //   - **版本即历史**：每次写入都追加一个 revision，可查看、可比、可回滚；
 //     制品靠「换 version 再发一版」实现迭代，配置靠「就地改 + 留痕」。
 //   - **不参与 fan-out**：配置是权威数据，只在被指向的那个节点上维护（master）；
-//     需要跨节点读，就让 Agent 指向 master（见 README 的「配置的权威位置」）。
+//     需要跨节点读，就让 Agent 指向 master（见 README 的 "Where the authoritative copy lives"）。
 //   - **敏感值静态加密**：`secret=true` 的配置落库前用本节点密钥 AES-256-GCM 加密，
 //     默认读取只回校验和与大小（打码），要明文必须显式 `--reveal`。
 package model

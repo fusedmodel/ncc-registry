@@ -5,7 +5,7 @@
 //	NCCR_PORT=8282 ./ncc-registry
 //	NCCR_ROLE=worker NCCR_MASTER_URL=http://office-master:8282 ./ncc-registry
 //
-// 想把同一套能力嵌进自己的进程，用 httpapi.NewServer（见 README「作为 Go 库使用」）。
+// 想把同一套能力嵌进自己的进程，用 httpapi.NewServer（见 README 的 "Using it as a Go library"）。
 package main
 
 import (

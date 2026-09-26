@@ -1,121 +1,149 @@
-# 更新日志（CHANGELOG）
+# Changelog
 
-`ncc-registry` —— 内网托管节点：单二进制 + 可嵌入的 Go 库。
+`ncc-registry` — a self-hosted registry node: one binary plus an embeddable Go library.
 
-格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
-版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
-「怎么用」看 [`README.md`](README.md)；**本文件只回答「这一版比上一版多了什么」**。
+Formatted after [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versioned with
+[Semantic Versioning](https://semver.org/). "How to use it" is in [`README.md`](README.md);
+**this file only answers what changed between releases**.
 
-> 本仓库原先寄居在 [`ncc`](https://github.com/fusedmodel/ncc) 的 `ncc-registry/` 目录下、
-> 与 CLI 共用一份 CHANGELOG。独立出来后**从 `0.1.0` 起走自己的版本线** ——
-> 所以 `0.1.0` 记的是「独立那一刻已经具备的全部能力」，不是新增功能。
+> This repository used to live inside [`ncc`](https://github.com/fusedmodel/ncc), in the
+> `ncc-registry/` directory, sharing one changelog with the CLI. After becoming its own repository it
+> **runs its own version line starting at `0.1.0`** — so `0.1.0` records *everything that already
+> existed at the moment of the split*, not new features.
 
 ---
 
-## [未发布]
+## [Unreleased]
 
-### 变更 · `hur` 的 kind 标签对齐写死的 HUR 定义
+### Changed · the `hur` kind label now follows the pinned HUR definition
 
-`HUR` = **Harness-Use Runtime** —— 那是**运行时**（定义：支撑 harness 完成 LLM 调用、工具编排、
-上下文管理、多 provider 接入、运行评估等任务）；`kind=hur` 的条目是**给它用的包**。
-所以标签不再把 HUR 本身叫“包规范”，两端现在给出一模一样的字符串：
-`Harness-Use Runtime 官方包（kind=agent 的包就是一个 Agent）`。
-定义出处：`ncc-platform/prd/ncc-harness.md` §0 📌（写死）。
+`HUR` = **Harness-Use Runtime** — that is the **runtime** (defined as the runtime that supports a
+harness in LLM calls, tool orchestration, context management, multi-provider access and run
+evaluation); an entry with `kind=hur` is the **package it consumes**. The label therefore no longer
+calls HUR itself a "package spec", and both sides now return exactly the same string — the literal
+value is:
 
-## [未发布]
+`Harness-Use Runtime 官方包（kind=agent 的包就是一个 Agent）`
 
-### 新增 · HUR 制品：上传校验与「加签」
+(The definition is pinned in the NCC project's design docs.)
 
-- **`PUT /api/registry/<ref>/signature`**（需 `registry:publish`）：给**已发布**的 `kind=hur` 制品
-  附着/替换签名。只收 `signature` 对象而不收整个 manifest —— 产物字节没变，收 manifest 就等于
-  允许顺手改权限面与产物摘要，那是「换包」不是「加签」。
-- **入库校验（`httpapi/hursign.go`）**：`kind=hur` 现在要求**自描述**（`manifest.hur` 的
-  `spec` / `id` / `artifact.sha256`），并做两条交叉核对：
-  - 上传字节 sha256 ≠ `manifest.hur.artifact.sha256` → `digest_mismatch`；
-  - `signature.sha256` ≠ 制品摘要 → `signature_mismatch`；
-  - `keynum` 缺失 / 非 minisign / 有 `url` 无 `sigSha256` → `bad_signature`。
-- **刻意不做**：不验密码学（要 Minisign 全套 + 受信公钥列表，属下载方判断）、
-  **不用本节点密钥代签** —— 「谁签的」必须由发布者自己的设备说了算。
-- **副本只读**：分发到本节点的副本不能在本地加签（`replica_readonly`），要走源头节点。
-- 控制台目录行为 `kind=hur` 且带签名的条目加上「已签名（keynum…）」徽章（本地条目才有
-  manifest；worker 上报的远端条目不带，所以不显示，而非表示未签）。
+### Added · HUR artifacts: upload validation and signature attachment
+
+- **`PUT /api/registry/<ref>/signature`** (requires `registry:publish`): attach or replace the
+  signature of an **already published** `kind=hur` artifact. It accepts only the `signature` object,
+  never the whole manifest — the artifact bytes have not changed, and accepting a manifest would mean
+  letting a caller quietly rewrite the permission surface and the artifact digest, which is
+  "swapping the package", not "signing it".
+- **Ingest validation (`httpapi/hursign.go`)**: `kind=hur` must now be **self-describing**
+  (`manifest.hur` carrying `spec` / `id` / `artifact.sha256`), with two cross-checks:
+  - uploaded bytes' `sha256` ≠ `manifest.hur.artifact.sha256` → `digest_mismatch`;
+  - `signature.sha256` ≠ the artifact digest → `signature_mismatch`;
+  - a missing `keynum`, something that is not Minisign, or a `url` without `sigSha256` → `bad_signature`.
+- **Deliberately not done**: no cryptographic verification (that needs the full Minisign machinery and
+  a trusted key list, and belongs to the downloader), and **no signing with this node's own key** —
+  "who signed it" must be decided by the publisher's own device.
+- **Replicas are read-only**: a replica replicated to this node cannot be signed locally
+  (`replica_readonly`); signing goes through the origin node.
+- The console marks `kind=hur` entries that carry a signature with a "signed (keynum…)" badge (only
+  local entries have a manifest; remote entries reported by workers do not, so the badge is absent
+  rather than meaning "unsigned").
 
 ## [0.1.0] — 2026-09-24
 
-首个独立版本：仓库从 `ncc` 拆出来（`module github.com/fusedmodel/ncc-registry`），
-既发布二进制，也发布可被 `go get` 的库。
+First standalone release: the repository was split out of `ncc`
+(`module github.com/fusedmodel/ncc-registry`), publishing both a binary and a `go get`-able library.
 
-### 变更 · 拆分为独立仓库与独立库
+### Changed · split into an independent repository and library
 
-- **module 路径**：`github.com/fusedmodel/ncc/ncc-registry` → `github.com/fusedmodel/ncc-registry`。
-  旧路径下所有代码都在 `internal/`，**模块外一个包也 import 不到** —— 也就是说作为库它从来就是不可用的。
-- **五个包提到顶层**，成为公开 API：`config` · `model` · `storage` · `store` · `httpapi`；
-  `p2p` 与 `secretbox` 留在 `internal/`（`httpapi` 照旧 import 它们，同模块内合法，外部拿不到）。
-- **新增 `httpapi.NewServer` 与 `(*Server).Close`**：`NewRouter` 只返回路由，拿不到句柄，
-  于是它启的后台循环（worker 心跳 / master 清理过期 worker / 可被打洞入口）没有任何停止机制 ——
-  进程退出无所谓，但作为库反复创建就会一直漏协程。`NewRouter` 保留原签名，内部委托给 `NewServer`。
-- 仓库自带 CI（gofmt / vet / build / 冒烟）与 Release（六个平台的二进制 + `checksums.txt` + GHCR 镜像）。
+- **Module path**: `github.com/fusedmodel/ncc/ncc-registry` → `github.com/fusedmodel/ncc-registry`.
+  Under the old path every package lived under `internal/`, so **not a single package could be
+  imported from outside the module** — as a library it had never been usable.
+- **Five packages were promoted to the top level** as public API: `config` · `model` · `storage` ·
+  `store` · `httpapi`; `p2p` and `secretbox` stay in `internal/` (`httpapi` still imports them, which
+  is legal inside the module and keeps them out of reach from outside).
+- **Added `httpapi.NewServer` and `(*Server).Close`**: `NewRouter` returned only the routes, so the
+  background loops it started (worker heartbeat / master sweeping expired workers / the
+  hole-punchable entry point) had no way to stop. That is fine for a process that is exiting, but
+  creating it repeatedly leaks goroutines. `NewRouter` keeps its signature and delegates to
+  `NewServer` internally.
+- The repository brought its own CI (gofmt / vet / build / smoke) and Release (binaries for six
+  platforms + `checksums.txt` + a GHCR image).
 
-### 修复 · 二进制入口 `cmd/ncc-registry` 一直不存在
+### Fixed · the binary entry point `cmd/ncc-registry` never existed
 
-`README.md`、`deploy/Dockerfile`、`scripts/smoke.sh` 三处都在 `go build ./cmd/ncc-registry`，
-但**这个目录从来没有被提交过**（初始提交 22 个文件全是 `internal/`）—— 也就是说
-文档里的构建命令一直是坏的，二进制压根编不出来。现已补上 `cmd/ncc-registry/main.go`
-（`config.Load` → `store.Open` → `storage.NewLocal` → `httpapi.NewServer`，含优雅退出）。
+`README.md`, `deploy/Dockerfile` and `scripts/smoke.sh` all said `go build ./cmd/ncc-registry`, but
+**that directory had never been committed** (the initial commit was 22 files, all under `internal/`).
+The documented build command had therefore always been broken and the binary could not be built at
+all. `cmd/ncc-registry/main.go` now exists (`config.Load` → `store.Open` → `storage.NewLocal` →
+`httpapi.NewServer`, with graceful shutdown).
 
-### 修复 · Windows 下制品 URL 带反斜杠（`storage.Local`）
+### Fixed · artifact URLs contained backslashes on Windows (`storage.Local`)
 
-`safeName` 用 `filepath.Clean` 清洗对象名，而对象名是**斜杠分隔**的标识（它要进 URL、
-也要在 master / worker 之间原样传递）。Windows 上 `filepath.Clean("/a")` 得到 `\a`，
-`TrimPrefix(clean, "/")` 再剥不掉那个反斜杠，于是 `PublicURL` 产出 `…/blobs/\a` 这种非法地址；
-把它填进 JSON 请求体就变成 400。现改用 `path`（斜杠语义）清洗、只在落盘时 `filepath.FromSlash`。
-顺带拒绝含 `\` 或 `:` 的对象名。**macOS / Linux 上行为完全不变。**
+`safeName` cleaned object names with `filepath.Clean`, but object names are **slash-separated**
+identifiers (they go into URLs and travel verbatim between master and worker). On Windows
+`filepath.Clean("/a")` yields `\a`, and `TrimPrefix(clean, "/")` could not strip that backslash, so
+`PublicURL` produced an invalid address such as `…/blobs/\a`; putting it in a JSON request body
+turned into a 400. Cleaning now uses `path` (slash semantics) and only converts with
+`filepath.FromSlash` when writing to disk. Object names containing `\` or `:` are rejected as well.
+**Behaviour on macOS / Linux is unchanged.**
 
-### 修复 · 冒烟脚本在 Windows 上的 3 项路径断言
+### Fixed · three path assertions in the smoke script on Windows
 
-`scripts/smoke.sh` 拿 `NCCR_*` 的 Git-Bash 路径（`/tmp/xxx`）比对接口回显的
-Windows 绝对路径（`C:\Users\…`），必然不等。属脚本的路径显示差异，不是被测行为；
-CI 跑在 ubuntu 上不受影响。当前共 **167 项检查**。
+`scripts/smoke.sh` took Git-Bash paths (`/tmp/xxx`) from `NCCR_*` and compared them against the
+Windows absolute paths (`C:\Users\…`) echoed by the API, which can never match. That is a
+path-display difference in the script, not in the behaviour under test; CI runs on ubuntu and is
+unaffected. The suite currently has **167 checks**.
 
-### 能力 · 制品托管与多节点
+### Capability · artifact hosting and multi-node
 
-- 账号 / 命名空间 / 发布 / 检索 / 下载 / 分发；`sha256` 校验、`@命名空间/slug` 稳定引用。
-- **master / worker**：权威在 master（账号、制品、节点目录）；worker 是边缘托管点，
-  自己也托管制品与节点并定期上报目录。客户端只认 master 一个地址 ——
-  查目录看聚合结果，下载时 master 去持有者那里把字节代理回来。
-- **集群写**：把条目**分发**（replicate）到 worker，下架时**回收**（revoke）副本。
-- 存储三处可分别指定：`NCCR_DATA_DIR` / `NCCR_BLOB_DIR` / `NCCR_DB_PATH`
-  （内网常见诉求：字节放 NAS、库存本地 SSD）。
+- Accounts / namespaces / publish / search / download / replication; `sha256` verification and a
+  stable `@namespace/slug` reference.
+- **master / worker**: the master is authoritative (accounts, artifacts, node directory); a worker is
+  an edge hosting point that hosts artifacts and nodes itself and periodically reports its directory.
+  Clients only need one address — the directory they read is aggregated, and on download the master
+  proxies the bytes back from whoever holds them.
+- **Cluster writes**: **replicate** entries to workers and **revoke** the replicas when removing them.
+- Three storage locations can be pointed at separately: `NCCR_DATA_DIR` / `NCCR_BLOB_DIR` /
+  `NCCR_DB_PATH` (the common private-deployment request: bytes on NAS, database on local SSD).
 
-### 能力 · 托管节点与 Agent 发现
+### Capability · hosted nodes and agent discovery
 
-- 用户把内网的 Agent / 服务**注册 + 心跳**托管进来，声明「我是谁、在哪、能干什么」。
-- 同一信任域内互相发现、收进连接表、按区域聚合；`/api/nodes/route` 回答
-  「这个能力该找哪个节点要」。
+- Users **register + heartbeat** the agents and services on their network, declaring *who I am, where
+  I am, what I can do*.
+- Nodes inside one trust domain discover each other, keep a connection list and aggregate by region;
+  `/api/nodes/route` answers "which node should serve this capability".
 
-### 能力 · 接入与授权（连接 ≠ 授权）
+### Capability · onboarding and authorization (connected ≠ authorized)
 
-- 一条内网短链（或 key+secret）就能把一个 Agent 加进来，兑换出的是**最小权限的节点令牌**。
-- 私有制品 / 私有节点 / 非公开配置要显式 `grant`，撤销立即生效（支持按命名空间限定）。
+- One short link (or key + secret) adds an agent, and what it redeems is a **least-privilege node
+  token**.
+- Private artifacts / private nodes / non-public config require an explicit `grant`, and revocation
+  takes effect immediately (optionally namespace-scoped).
 
-### 能力 · 配置托管
+### Capability · configuration hosting
 
-- 团队的网络 / 基础设施 / Agent 配置作为一等资源：版本历史、回滚、按环境成组拉取。
-- 10 种类型、7 种格式、单条上限 128 KB；`secret=true` 的配置**静态加密**
-  （AES-256-GCM，密钥由本节点 `jwt-secret` 派生，密文前缀 `enc:v1:`）——
-  只备份数据库是安全的；反过来换机器 / 丢数据目录就解不开（设计意图，不是缺陷）。
+- Team network / infrastructure / agent configuration as a first-class resource: revision history,
+  rollback, and per-environment bundle fetch.
+- 10 kinds, 7 formats, a 128 KB limit per entry; configs with `secret=true` are **encrypted at rest**
+  (AES-256-GCM, key derived from this node's `jwt-secret`, ciphertext prefixed `enc:v1:`) — backing up
+  only the database is safe; conversely, moving machines or losing the data directory means those
+  values can no longer be decrypted (intentional, not a defect).
 
-### 能力 · 分享链接与节点治理
+### Capability · share links and node governance
 
-- **分享**：把一条制品变成临时下载地址发出去，对方不用登录、不用装 CLI；可限次 / 限时 / 撤销。
-- **治理（admin）**：本节点第一个注册的账号自动成为管理员，同时签发机器凭据 `AK-…`；
-  管用户 / 节点 / 服务（禁用启停、重置密码、摘除、归档），每个动作都进审计。
+- **Sharing**: turn an artifact into a temporary download address, with no account and no CLI needed
+  on the receiving end; limited in uses and time, revocable.
+- **Governance (admin)**: the first account registered on this node automatically becomes an admin,
+  and a machine credential `AK-…` is issued at the same time; it manages users / nodes / services
+  (disable, enable, reset passwords, remove, archive), and every action is audited.
 
-### 能力 · 节点侧 P2P（打洞条件判断面）
+### Capability · node-side P2P (hole-punching decision surface)
 
-- `GET /api/p2p/self`：在**这台机器**上出 NAT 画像与结论；`POST /api/p2p/check`：
-  与一个已知映射地址**真实对打**（0 字节，不传业务）；`GET|POST /api/p2p/serve`：
-  开一个只应答 STUN Binding 请求的可被打洞入口（默认**关**，`NCCR_P2P_SERVE=1` 才随服务启动）。
-- **实测结论**：纯被动应答在「地址/端口相关过滤」的 NAT 上收不到任何包 ——
-  过滤孔必须自己先发才开，所以入口默认带**反向打洞**（每 300 ms 向对端发一个 Binding 请求）。
-- 字节面（真正的数据传输）尚未接上，见 `ncc` 仓库的 `prd/ncc-p2p-data.md`。
+- `GET /api/p2p/self`: produce a NAT profile and a conclusion on **this machine**;
+  `POST /api/p2p/check`: perform a **real probe** (0 bytes, no business data) against a known mapped
+  address; `GET|POST /api/p2p/serve`: open an entry point that answers STUN Binding requests only
+  (**off** by default; `NCCR_P2P_SERVE=1` starts it with the service).
+- **Measured conclusion**: a purely passive responder receives nothing on an
+  `address_and_port_dependent` NAT — the hole must be opened by sending first, so the entry point
+  performs **reverse punching** by default (one Binding request to the peer every 300 ms).
+- The byte layer (the actual transfer) is not connected yet.
